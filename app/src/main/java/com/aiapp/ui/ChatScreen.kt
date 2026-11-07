@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -39,7 +41,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,12 +54,12 @@ import com.aiapp.llm.Role
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit) {
-    var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
 
+    // Keep the end of the conversation in view, including the reply as it streams in.
     LaunchedEffect(vm.messages.size, vm.streamingText.length, vm.streaming) {
         val count = vm.messages.size + if (vm.streaming) 1 else 0
-        if (count > 0) listState.scrollToItem(count - 1)
+        if (count > 0) listState.scrollToItem(count - 1, scrollOffset = 1_000_000) // clamped to the end by LazyColumn
     }
 
     Scaffold(
@@ -75,13 +76,10 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit) {
         },
         bottomBar = {
             Composer(
-                text = input,
-                onTextChange = { input = it },
+                text = vm.input,
+                onTextChange = { vm.input = it },
                 streaming = vm.streaming,
-                onSend = {
-                    vm.send(input)
-                    if (vm.streaming) input = ""
-                },
+                onSend = { vm.send() },
                 onStop = vm::stop,
             )
         },
@@ -255,6 +253,8 @@ private fun Composer(
         Row(
             Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

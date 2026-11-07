@@ -22,8 +22,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Run unit tests
+        run: chmod +x gradlew && ./gradlew testDebugUnitTest --stacktrace
+
       - name: Build debug APK
-        run: chmod +x gradlew && ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk AIApp-${{ github.run_number }}.apk

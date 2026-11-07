@@ -94,7 +94,15 @@ The app queries each provider's list-models endpoint, so new models (Opus 5.5, S
 | Max | Strongest available | Maximum | Plan → build → emulator test, 10 rounds |
 | Auto | Chosen per task | — | — |
 
-Each level maps to that provider's own reasoning setting (Claude thinking budget, OpenAI `reasoning_effort`, Gemini thinking budget). If a model rejects the setting, the app retries without it.
+Each level maps to that provider's own reasoning setting. If a model rejects a setting, the app steps down to a plainer request before showing an error.
+
+| Level | Claude (`output_config.effort` + adaptive thinking) | ChatGPT (`reasoning_effort`) | Gemini 3+ (`thinkingLevel`) / 2.5 (`thinkingBudget`) |
+|---|---|---|---|
+| Auto | not sent (model default) | not sent | not sent |
+| Low | low | low | low / 0 |
+| Medium | medium | medium | medium / dynamic |
+| High | high | high | high / 8,192 |
+| Max | max | xhigh, then high | high / 24,576 |
 
 ## 5. Offline engine
 
@@ -236,7 +244,7 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 | Phase | Deliverable | Done when |
 |---|---|---|
 | 0 ✅ | Repo, GitHub Actions APK build + Releases | APK downloads from the latest release |
-| 1 (v0.1, in progress) | Chat with Claude/Gemini/GPT, keys, model picker, effort levels, streaming, Stop | Streaming chat works with all 3 providers |
+| 1 (v0.1, code complete; needs a device test) | Chat with Claude/Gemini/GPT, keys, model picker, effort levels, streaming, Stop | Streaming chat works with all 3 providers |
 | 2 | Conversation history, Markdown rendering, Google/email login | History survives restart |
 | 3 | Voice with barge-in (Spec 1) | Stops within 150 ms when you talk |
 | 4 | File upload + RAG, image/video generation | Answers cite files; prompt → clip |

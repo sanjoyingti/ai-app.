@@ -19,29 +19,10 @@ class OpenAiProvider : LlmProvider {
 
     private fun headers(key: String) = mapOf("Authorization" to "Bearer $key")
 
-    private val excluded = listOf(
-        "audio", "realtime", "tts", "transcribe", "image", "search", "embedding",
-        "moderation", "whisper", "dall-e", "instruct", "codex",
-    )
-
-    private val reasoningPattern = Regex("^(o\\d|gpt-5)")
-
     override suspend fun listModels(apiKey: String): List<ModelInfo> {
         val data = Http.getJson("$base/models", headers(apiKey))["data"] as? JsonArray ?: return emptyList()
-        return data.mapNotNull { el -> ((el as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull }
-            .filter { id ->
-                (id.startsWith("gpt") || id.startsWith("chatgpt") || Regex("^o\\d").containsMatchIn(id)) &&
-                    excluded.none { id.contains(it) }
-            }
-            .sortedDescending()
-            .map { ModelInfo(it, it) }
-    }
-
-    private fun effortValue(effort: Effort): String? = when (effort) {
-        Effort.LOW -> "low"
-        Effort.MEDIUM -> "medium"
-        Effort.HIGH, Effort.MAX -> "high"
-        Effort.AUTO -> null
+        val ids = data.mapNotNull { el -> ((el as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull }
+        return filterChatModels(ids).map { ModelInfo(it, it) }
     }
 
     override fun stream(
@@ -50,44 +31,76 @@ class OpenAiProvider : LlmProvider {
         messages: List<ChatMessage>,
         effort: Effort,
         system: String,
-    ): Flow<String> = fallbackOn400(
-        primary = { request(apiKey, model, messages, system, effortValue(effort)) },
-        fallback = { request(apiKey, model, messages, system, null) },
-    )
-
-    private fun request(
-        apiKey: String,
-        model: String,
-        messages: List<ChatMessage>,
-        system: String,
-        effort: String?,
     ): Flow<String> {
-        val reasoning = reasoningPattern.containsMatchIn(model)
-        val body = buildJsonObject {
-            put("model", model)
-            put("stream", true)
-            putJsonArray("messages") {
-                addJsonObject {
-                    put("role", if (reasoning) "developer" else "system")
-                    put("content", system)
-                }
-                messages.forEach { m ->
-                    addJsonObject {
-                        put("role", if (m.role == Role.USER) "user" else "assistant")
-                        put("content", m.text)
-                    }
-                }
-            }
-            if (reasoning && effort != null) put("reasoning_effort", effort)
-        }.toString()
-
-        return Http.sse("$base/chat/completions", headers(apiKey), body).mapNotNull { data -> parse(data) }
+        val history = normalize(messages)
+        val attempts = effortValues(model, effort).map { value ->
+            { request(apiKey, buildBody(model, history, system, value)) }
+        } + listOf({ request(apiKey, buildBody(model, history, system, null)) })
+        return withFallbacks(attempts)
     }
 
-    private fun parse(data: String): String? {
-        val o = Http.json.parseToJsonElement(data).jsonObject
-        val choice = (o["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
-        val delta = choice["delta"] as? JsonObject ?: return null
-        return (delta["content"] as? JsonPrimitive)?.contentOrNull
+    private fun request(apiKey: String, body: String): Flow<String> =
+        Http.sse("$base/chat/completions", headers(apiKey), body).mapNotNull { data -> parse(data) }
+
+    internal companion object {
+        private val excluded = listOf(
+            "audio", "realtime", "tts", "transcribe", "image", "search", "embedding",
+            "moderation", "whisper", "dall-e", "instruct", "codex",
+        )
+
+        private val reasoningPattern = Regex("^(o\\d|gpt-([5-9]|\\d{2}))")
+
+        fun isReasoning(model: String): Boolean = reasoningPattern.containsMatchIn(model)
+
+        fun filterChatModels(ids: List<String>): List<String> = ids
+            .filter { id ->
+                (id.startsWith("gpt") || id.startsWith("chatgpt") || Regex("^o\\d").containsMatchIn(id)) &&
+                    excluded.none { id.contains(it) }
+            }
+            .sortedDescending()
+
+        /**
+         * reasoning_effort values to try, best first. Max asks for xhigh and steps down to high on
+         * models without it. Non-reasoning models and AUTO send none.
+         */
+        fun effortValues(model: String, effort: Effort): List<String> {
+            if (!isReasoning(model)) return emptyList()
+            return when (effort) {
+                Effort.AUTO -> emptyList()
+                Effort.LOW -> listOf("low")
+                Effort.MEDIUM -> listOf("medium")
+                Effort.HIGH -> listOf("high")
+                Effort.MAX -> listOf("xhigh", "high")
+            }
+        }
+
+        fun buildBody(model: String, messages: List<ChatMessage>, system: String, effort: String?): String =
+            buildJsonObject {
+                put("model", model)
+                put("stream", true)
+                putJsonArray("messages") {
+                    addJsonObject {
+                        put("role", if (isReasoning(model)) "developer" else "system")
+                        put("content", system)
+                    }
+                    messages.forEach { m ->
+                        addJsonObject {
+                            put("role", if (m.role == Role.USER) "user" else "assistant")
+                            put("content", m.text)
+                        }
+                    }
+                }
+                if (effort != null) put("reasoning_effort", effort)
+            }.toString()
+
+        fun parse(data: String): String? {
+            val o = Http.json.parseToJsonElement(data).jsonObject
+            (o["error"] as? JsonObject)?.let { err ->
+                throw ProviderException(500, (err["message"] as? JsonPrimitive)?.contentOrNull ?: "ChatGPT error")
+            }
+            val choice = (o["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
+            val delta = choice["delta"] as? JsonObject ?: return null
+            return (delta["content"] as? JsonPrimitive)?.contentOrNull
+        }
     }
 }

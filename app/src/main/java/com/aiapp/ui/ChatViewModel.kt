@@ -28,6 +28,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     val messages = mutableStateListOf<ChatMessage>()
 
+    /** The text in the message box. Kept here so a failed send can put it back. */
+    var input by mutableStateOf("")
+
     var streamingText by mutableStateOf("")
         private set
     var streaming by mutableStateOf(false)
@@ -53,6 +56,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     private var job: Job? = null
+    private var turnId = 0
 
     init {
         refreshModels()
@@ -110,7 +114,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(text: String) {
+    fun send(text: String = input) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || streaming) return
         val k = keys.get(provider)
@@ -123,27 +127,37 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         error = null
+        input = ""
         messages += ChatMessage(Role.USER, trimmed)
         val history = messages.toList()
         val p = provider
         val m = model
         val e = effort
 
+        val turn = ++turnId
         streaming = true
         streamingText = ""
         status = "Thinking…"
         job = viewModelScope.launch {
             try {
                 Providers.get(p).stream(k, m, history, e, SYSTEM_PROMPT).collect { delta ->
+                    if (turn != turnId) return@collect
                     if (status != "Writing…") status = "Writing…"
                     streamingText += delta
                 }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (t: Throwable) {
-                error = friendly(t)
+                if (turn == turnId) {
+                    error = friendly(t, p)
+                    // Nothing came back: take the message out of the chat and put it back in the box.
+                    if (streamingText.isBlank() && messages.lastOrNull()?.role == Role.USER) {
+                        messages.removeAt(messages.lastIndex)
+                        if (input.isBlank()) input = trimmed
+                    }
+                }
             } finally {
-                finishStream()
+                if (turn == turnId) finishStream()
             }
         }
     }
@@ -154,7 +168,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun newChat() {
-        stop()
+        job?.cancel()
+        job = null
+        turnId++ // the cancelled reply, if any, must not land in the new chat
+        streamingText = ""
+        status = null
+        streaming = false
         messages.clear()
         error = null
     }
@@ -166,11 +185,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         streaming = false
     }
 
-    private fun friendly(t: Throwable): String = when {
+    private fun friendly(t: Throwable, p: ProviderId = provider): String = when {
         t is ProviderException && (t.code == 401 || t.code == 403) ->
-            "Your ${provider.label} key was rejected. Check it in Settings."
+            "Your ${p.label} key was rejected. Check it in Settings."
         t is ProviderException && t.code == 429 ->
             "Rate limit reached. Wait a moment and try again."
+        t is ProviderException && (t.code == 529 || t.code == 503) ->
+            "${p.label} is busy right now. Try again in a moment."
         t is ProviderException -> t.message ?: "Request failed (${t.code})."
         t is IOException -> "Network error. Check your connection and try again."
         else -> t.message ?: "Something went wrong."

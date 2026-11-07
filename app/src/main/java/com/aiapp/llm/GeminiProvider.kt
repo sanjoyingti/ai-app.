@@ -34,32 +34,52 @@ class GeminiProvider : LlmProvider {
         }.sortedByDescending { it.id }
     }
 
-    private fun thinkingBudget(effort: Effort): Int? = when (effort) {
-        Effort.LOW -> 0
-        Effort.HIGH -> 8_192
-        Effort.MAX -> 24_576
-        else -> null
-    }
-
     override fun stream(
         apiKey: String,
         model: String,
         messages: List<ChatMessage>,
         effort: Effort,
         system: String,
-    ): Flow<String> = fallbackOn400(
-        primary = { request(apiKey, model, messages, system, thinkingBudget(effort)) },
-        fallback = { request(apiKey, model, messages, system, null) },
-    )
-
-    private fun request(
-        apiKey: String,
-        model: String,
-        messages: List<ChatMessage>,
-        system: String,
-        budget: Int?,
     ): Flow<String> {
-        val body = buildJsonObject {
+        val history = normalize(messages)
+        val attempts = thinkingConfigs(model, effort).map { config ->
+            { request(apiKey, model, buildBody(history, system, config)) }
+        } + listOf({ request(apiKey, model, buildBody(history, system, null)) })
+        return withFallbacks(attempts)
+    }
+
+    private fun request(apiKey: String, model: String, body: String): Flow<String> {
+        val url = "$base/models/$model:streamGenerateContent?alt=sse"
+        return Http.sse(url, headers(apiKey), body).mapNotNull { data -> parse(data) }
+    }
+
+    /** One thinkingConfig setting: a level (Gemini 3 and later) or a token budget (Gemini 2.5). */
+    internal sealed interface Thinking {
+        data class Level(val value: String) : Thinking
+        data class Budget(val tokens: Int) : Thinking
+    }
+
+    internal companion object {
+        private val levelModel = Regex("gemini-([3-9]|\\d{2})")
+
+        /** Settings to try, best first; the caller always ends with a plain request. */
+        fun thinkingConfigs(model: String, effort: Effort): List<Thinking> {
+            val level = when (effort) {
+                Effort.AUTO -> return emptyList()
+                Effort.LOW -> Thinking.Level("low")
+                Effort.MEDIUM -> Thinking.Level("medium")
+                Effort.HIGH, Effort.MAX -> Thinking.Level("high")
+            }
+            val budget = when (effort) {
+                Effort.LOW -> Thinking.Budget(0)
+                Effort.MEDIUM -> Thinking.Budget(-1) // dynamic
+                Effort.HIGH -> Thinking.Budget(8_192)
+                else -> Thinking.Budget(24_576)
+            }
+            return if (levelModel.containsMatchIn(model)) listOf(level, budget) else listOf(budget, level)
+        }
+
+        fun buildBody(messages: List<ChatMessage>, system: String, thinking: Thinking?): String = buildJsonObject {
             putJsonObject("systemInstruction") {
                 putJsonArray("parts") { addJsonObject { put("text", system) } }
             }
@@ -71,26 +91,41 @@ class GeminiProvider : LlmProvider {
                     }
                 }
             }
-            if (budget != null) {
+            if (thinking != null) {
                 putJsonObject("generationConfig") {
-                    putJsonObject("thinkingConfig") { put("thinkingBudget", budget) }
+                    putJsonObject("thinkingConfig") {
+                        when (thinking) {
+                            is Thinking.Level -> put("thinkingLevel", thinking.value)
+                            is Thinking.Budget -> put("thinkingBudget", thinking.tokens)
+                        }
+                    }
                 }
             }
         }.toString()
 
-        val url = "$base/models/$model:streamGenerateContent?alt=sse"
-        return Http.sse(url, headers(apiKey), body).mapNotNull { data -> parse(data) }
-    }
+        fun parse(data: String): String? {
+            val o = Http.json.parseToJsonElement(data).jsonObject
+            (o["error"] as? JsonObject)?.let { err ->
+                throw ProviderException(500, (err["message"] as? JsonPrimitive)?.contentOrNull ?: "Gemini error")
+            }
+            val blocked = ((o["promptFeedback"] as? JsonObject)?.get("blockReason") as? JsonPrimitive)?.contentOrNull
+            if (blocked != null) throw ProviderException(422, "Gemini declined this message ($blocked).")
 
-    private fun parse(data: String): String? {
-        val o = Http.json.parseToJsonElement(data).jsonObject
-        val candidate = (o["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
-        val parts = (candidate["content"] as? JsonObject)?.get("parts") as? JsonArray ?: return null
-        val text = parts.mapNotNull { p ->
-            val part = p as? JsonObject ?: return@mapNotNull null
-            if ((part["thought"] as? JsonPrimitive)?.booleanOrNull == true) return@mapNotNull null
-            (part["text"] as? JsonPrimitive)?.contentOrNull
-        }.joinToString("")
-        return text.ifEmpty { null }
+            val candidate = (o["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
+            val parts = (candidate["content"] as? JsonObject)?.get("parts") as? JsonArray
+            val text = parts.orEmpty().mapNotNull { p ->
+                val part = p as? JsonObject ?: return@mapNotNull null
+                if ((part["thought"] as? JsonPrimitive)?.booleanOrNull == true) return@mapNotNull null
+                (part["text"] as? JsonPrimitive)?.contentOrNull
+            }.joinToString("")
+            if (text.isEmpty()) {
+                val finish = (candidate["finishReason"] as? JsonPrimitive)?.contentOrNull
+                if (finish in setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII")) {
+                    throw ProviderException(500, "Gemini stopped this reply ($finish).")
+                }
+                return null
+            }
+            return text
+        }
     }
 }

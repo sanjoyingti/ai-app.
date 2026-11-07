@@ -1,7 +1,6 @@
 package com.aiapp.llm
 
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 
 enum class ProviderId(val label: String) {
@@ -40,19 +39,45 @@ interface LlmProvider {
 }
 
 /**
- * Runs [primary]; if it is rejected with HTTP 400 before any text arrives (usually because the
- * model doesn't accept a reasoning setting), runs [fallback] instead.
+ * Tries each request in order. If one is rejected with HTTP 400 before any text arrives (usually
+ * because the model doesn't accept that reasoning setting), the next, plainer one is tried.
+ * Any other error, or a 400 on the last attempt, is passed on.
  */
-fun fallbackOn400(primary: () -> Flow<String>, fallback: () -> Flow<String>): Flow<String> = flow {
-    var emitted = false
-    try {
-        primary().collect {
-            emitted = true
-            emit(it)
+fun withFallbacks(attempts: List<() -> Flow<String>>): Flow<String> = flow {
+    require(attempts.isNotEmpty())
+    for ((index, attempt) in attempts.withIndex()) {
+        var emitted = false
+        try {
+            attempt().collect {
+                emitted = true
+                emit(it)
+            }
+            return@flow
+        } catch (e: ProviderException) {
+            if (e.code != 400 || emitted || index == attempts.lastIndex) throw e
         }
-    } catch (e: ProviderException) {
-        if (e.code == 400 && !emitted) emitAll(fallback()) else throw e
     }
+}
+
+/**
+ * Drops empty turns and merges back-to-back turns from the same side (left behind when a reply is
+ * stopped before any text arrives), so every provider gets a clean user/assistant alternation that
+ * starts with the user.
+ */
+fun normalize(messages: List<ChatMessage>): List<ChatMessage> {
+    val out = ArrayList<ChatMessage>()
+    for (m in messages) {
+        if (m.text.isBlank()) continue
+        val last = out.lastOrNull()
+        if (last != null && last.role == m.role) {
+            out[out.lastIndex] = ChatMessage(m.role, last.text + "\n\n" + m.text)
+        } else if (out.isEmpty() && m.role == Role.ASSISTANT) {
+            continue
+        } else {
+            out += m
+        }
+    }
+    return out
 }
 
 object Providers {
