@@ -232,11 +232,7 @@ class BuildAgent(
             step(BuildEvent.Kind.DOWNLOAD, "Added your file ${a.name} as $ref")
             notes += "The user's file ${a.name} is in the project as $ref; use it where it fits."
         }
-        return if (notes.isEmpty()) "" else "
-
-Files from the user:
-" + notes.joinToString("
-") { "- $it" }
+        return if (notes.isEmpty()) "" else "\n\nFiles from the user:\n" + notes.joinToString("\n") { "- $it" }
     }
 
     private suspend fun ask(prompt: String, attachments: List<com.aiapp.llm.Attachment> = emptyList()): String {
