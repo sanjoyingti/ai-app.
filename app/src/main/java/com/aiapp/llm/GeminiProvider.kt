@@ -63,11 +63,12 @@ class GeminiProvider : LlmProvider {
             putJsonObject("systemInstruction") {
                 putJsonArray("parts") { addJsonObject { put("text", system) } }
             }
+            val withFiles = AttachmentContent.binaryIndices(messages)
             putJsonArray("contents") {
-                messages.forEach { m ->
+                messages.forEachIndexed { i, m ->
                     addJsonObject {
                         put("role", if (m.role == Role.USER) "user" else "model")
-                        putJsonArray("parts") { addJsonObject { put("text", m.text) } }
+                        put("parts", AttachmentContent.geminiParts(m, i in withFiles))
                     }
                 }
             }

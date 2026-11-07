@@ -257,7 +257,8 @@ class OfflineProvider(context: Context) : LlmProvider {
         }
         val last = messages.lastOrNull { it.role == Role.USER } ?: return@flow
         val history = messages.dropLast(1).map {
-            if (it.role == Role.USER) Message.user(it.text) else Message.model(it.text)
+            val t = AttachmentContent.text(it, filesSentNatively = false, canReadFiles = false)
+            if (it.role == Role.USER) Message.user(t) else Message.model(t)
         }
         engineLock.withLock {
             val eng = loadEngine(m)
@@ -266,7 +267,8 @@ class OfflineProvider(context: Context) : LlmProvider {
                 initialMessages = history,
             )
             eng.createConversation(config).use { conversation ->
-                conversation.sendMessageAsync(last.text).collect { emit(it.toString()) }
+                conversation.sendMessageAsync(AttachmentContent.text(last, filesSentNatively = false, canReadFiles = false))
+                    .collect { emit(it.toString()) }
             }
         }
     }.flowOn(Dispatchers.Default)

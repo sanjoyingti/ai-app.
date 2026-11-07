@@ -44,6 +44,32 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val store = ChatStore(app)
     private var conversationId: String = prefs.getString("current_chat", null) ?: UUID.randomUUID().toString()
 
+    /** Files picked for the next message. */
+    val pendingAttachments = mutableStateListOf<com.aiapp.llm.Attachment>()
+    var attaching by mutableStateOf(false)
+        private set
+
+    fun attach(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        attaching = true
+        viewModelScope.launch {
+            uris.forEach { uri ->
+                try {
+                    pendingAttachments += com.aiapp.data.AttachmentStore.import(getApplication(), uri)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    error = e.message ?: "Couldn't attach that file."
+                }
+            }
+            attaching = false
+        }
+    }
+
+    fun removeAttachment(a: com.aiapp.llm.Attachment) {
+        pendingAttachments.remove(a)
+    }
+
     /** Saved chats for the Chats screen, newest first. */
     var history by mutableStateOf<List<Conversation>>(emptyList())
         private set
@@ -331,7 +357,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun send(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || streaming) return
+        if ((trimmed.isEmpty() && pendingAttachments.isEmpty()) || streaming) return
         val k = keys.get(provider)
         if (provider.needsKey && k.isBlank()) {
             error = "Add your ${provider.label} API key in Settings."
@@ -342,7 +368,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         error = null
-        messages += ChatMessage(Role.USER, trimmed)
+        messages += ChatMessage(Role.USER, trimmed, pendingAttachments.toList())
+        pendingAttachments.clear()
         val history = messages.toList()
         val p = provider
         val m = model

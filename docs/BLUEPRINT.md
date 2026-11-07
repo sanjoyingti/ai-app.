@@ -1,6 +1,6 @@
 # Autonomous Mobile AI App: Master Blueprint
 
-Version 1.3 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
+Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
 
 ## 0. What you asked for
 
@@ -20,6 +20,24 @@ Version 1.3 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 12 | Long agent runs like Android Studio without burning credit | §9.3, §11 |
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
+
+## Status (v0.8, 7 Nov 2026)
+
+Built and shipping from GitHub Releases (`releases/latest`):
+
+| Area | What works | Code |
+|---|---|---|
+| Chat | Claude, Gemini, ChatGPT, Open models (OpenRouter), Offline; most-advanced-first picker; Low–Max effort; streaming; Stop | `llm/` |
+| Web access | Every model, offline included, can search (DuckDuckGo, Wikipedia fallback), read pages and save files to Downloads/AIApp; up to 6 lookups per answer; Web chip on by default | `llm/WebTools.kt`, `data/Downloads.kt` |
+| Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
+| History | Chats saved on the phone; Chats screen; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `ui/Markdown.kt` |
+| Attachments | Photos and PDFs sent natively to Claude, Gemini, ChatGPT and OpenRouter; text/CSV/code files to every model; big files trimmed to the most relevant parts; photos shrunk to 1600 px | `llm/AttachmentContent.kt`, `data/AttachmentStore.kt` |
+| Voice | Phone speech recognizer + text-to-speech; reply read aloud then listens again; Interrupt button; voice, pitch and speed choice | `ui/Voice.kt` |
+| Build Mode | Agent-style timeline, files and code viewer, follow-up changes on the same project, background service with notifications, stable signing key, library lookup and downloads, web lookups | `builder/` |
+| GitHub | Sign in with GitHub (device flow, OAuth app "AI App", Client ID built in); a repo is created per project | `builder/GitHubLogin.kt` |
+| Create | Images (Gemini image/Imagen, OpenAI gpt-image) and video (Gemini video models found on your key), saved to the gallery | `media/MediaGen.kt` |
+
+Not built yet: Google/email login with chat sync (needs a Firebase project), true hands-free barge-in (talking over the reply), fully offline APK builds on the phone.
 
 ---
 
@@ -272,9 +290,9 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 |---|---|---|
 | 0 ✅ | Repo, GitHub Actions APK build + Releases | APK downloads from the latest release |
 | 1 (v0.1, in progress) | Chat with Claude/Gemini/GPT, keys, model picker, effort levels, streaming, Stop | Streaming chat works with all 3 providers |
-| 2 | Conversation history, Markdown rendering, Google/email login | History survives restart |
-| 3 | Voice with barge-in (Spec 1) | Stops within 150 ms when you talk |
-| 4 | File upload + RAG, image/video generation | Answers cite files; prompt → clip |
+| 2 ✅ (v0.6–0.7, except login) | Conversation history, Markdown rendering; Google/email login still to do | History survives restart |
+| 3 ◐ (v0.8) | Voice mode with tap-to-interrupt; full barge-in (Spec 1) still to do | Stops within 150 ms when you talk |
+| 4 ✅ (v0.7–0.8) | File upload with keyword retrieval for big files, image/video generation | Answers cite files; prompt → clip |
 | 5 ✅ (v0.4) | App-building agent via GitHub Actions (Spec 2), with library lookup and file downloads | Described app → installable APK link |
 | 6a ✅ (v0.2) | Offline Gemma 4 E4B/E2B via LiteRT-LM; most-advanced-first model picker; new Claude/ChatGPT effort settings | Chat works in airplane mode |
 | 6b ✅ (v0.3) | Biggest open models in the cloud via OpenRouter (no PC) | Kimi/DeepSeek/GLM/Qwen answer in chat |

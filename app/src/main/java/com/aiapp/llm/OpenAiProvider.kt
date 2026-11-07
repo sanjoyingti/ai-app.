@@ -76,10 +76,11 @@ class OpenAiProvider : LlmProvider {
                     put("role", if (reasoning) "developer" else "system")
                     put("content", system)
                 }
-                messages.forEach { m ->
+                val withFiles = AttachmentContent.binaryIndices(messages)
+                messages.forEachIndexed { i, m ->
                     addJsonObject {
                         put("role", if (m.role == Role.USER) "user" else "assistant")
-                        put("content", m.text)
+                        put("content", AttachmentContent.openAi(m, i in withFiles))
                     }
                 }
             }

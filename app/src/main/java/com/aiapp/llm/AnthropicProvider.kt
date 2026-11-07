@@ -93,11 +93,12 @@ class AnthropicProvider : LlmProvider {
             put("max_tokens", maxTokens)
             put("stream", true)
             put("system", system)
+            val withFiles = AttachmentContent.binaryIndices(messages)
             putJsonArray("messages") {
-                messages.forEach { m ->
+                messages.forEachIndexed { i, m ->
                     addJsonObject {
                         put("role", if (m.role == Role.USER) "user" else "assistant")
-                        put("content", m.text)
+                        put("content", AttachmentContent.anthropic(m, i in withFiles))
                     }
                 }
             }

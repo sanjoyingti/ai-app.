@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -252,7 +254,10 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     Surface(tonalElevation = 2.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             problem?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
