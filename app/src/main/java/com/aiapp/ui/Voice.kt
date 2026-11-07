@@ -86,13 +86,13 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
         speak("Hello! This is how I sound.") {}
     }
 
-    fun setPitch(p: Float) {
+    fun choosePitch(p: Float) {
         pitch = p
         prefs.edit().putFloat("pitch", p).apply()
         applyVoice()
     }
 
-    fun setRate(r: Float) {
+    fun chooseRate(r: Float) {
         rate = r
         prefs.edit().putFloat("rate", r).apply()
         applyVoice()

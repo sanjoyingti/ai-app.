@@ -423,13 +423,13 @@ private fun VoicePanel(voice: VoiceController, streaming: Boolean, onTalk: () ->
                 Text("Pitch", style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("Deeper" to 0.8f, "Normal" to 1.0f, "Higher" to 1.2f).forEach { (n, p) ->
-                        FilterChip(selected = voice.pitch == p, onClick = { voice.setPitch(p) }, label = { Text(n) })
+                        FilterChip(selected = voice.pitch == p, onClick = { voice.choosePitch(p) }, label = { Text(n) })
                     }
                 }
                 Text("Speed", style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("Slow" to 0.8f, "Normal" to 1.0f, "Fast" to 1.25f).forEach { (n, r) ->
-                        FilterChip(selected = voice.rate == r, onClick = { voice.setRate(r) }, label = { Text(n) })
+                        FilterChip(selected = voice.rate == r, onClick = { voice.chooseRate(r) }, label = { Text(n) })
                     }
                 }
                 Text(

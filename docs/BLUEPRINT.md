@@ -289,7 +289,7 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 | Phase | Deliverable | Done when |
 |---|---|---|
 | 0 ✅ | Repo, GitHub Actions APK build + Releases | APK downloads from the latest release |
-| 1 (v0.1, in progress) | Chat with Claude/Gemini/GPT, keys, model picker, effort levels, streaming, Stop | Streaming chat works with all 3 providers |
+| 1 ✅ (v0.1–0.3) | Chat with Claude/Gemini/GPT, keys, model picker, effort levels, streaming, Stop | Streaming chat works with all 3 providers |
 | 2 ✅ (v0.6–0.7, except login) | Conversation history, Markdown rendering; Google/email login still to do | History survives restart |
 | 3 ◐ (v0.8) | Voice mode with tap-to-interrupt; full barge-in (Spec 1) still to do | Stops within 150 ms when you talk |
 | 4 ✅ (v0.7–0.8) | File upload with keyword retrieval for big files, image/video generation | Answers cite files; prompt → clip |
