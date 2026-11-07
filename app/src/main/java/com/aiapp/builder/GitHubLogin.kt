@@ -41,16 +41,26 @@ object GitHubLogin {
     private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
 
     suspend fun start(clientId: String): DeviceCode {
-        val r = postForm("https://github.com/login/device/code", mapOf("client_id" to clientId, "scope" to SCOPES))
-        r.str("error")?.let {
-            throw ProviderException(400, if (it == "device_flow_disabled") "Turn on \"Enable Device Flow\" in your GitHub OAuth app." else "GitHub: ${r.str("error_description") ?: it}")
+        var r: JsonObject? = null
+        for (attempt in 0 until 3) {
+            try {
+                r = postForm("https://github.com/login/device/code", mapOf("client_id" to clientId, "scope" to SCOPES))
+                break
+            } catch (e: java.io.IOException) {
+                if (attempt == 2) throw java.io.IOException("No internet connection. Check your connection and try again.")
+                delay(2000)
+            }
+        }
+        val res = r!!
+        res.str("error")?.let {
+            throw ProviderException(400, if (it == "device_flow_disabled") "Turn on \"Enable Device Flow\" in your GitHub OAuth app." else "GitHub: ${res.str("error_description") ?: it}")
         }
         return DeviceCode(
-            deviceCode = r.str("device_code") ?: throw ProviderException(500, "GitHub didn't return a code."),
-            userCode = r.str("user_code").orEmpty(),
-            verificationUri = r.str("verification_uri") ?: "https://github.com/login/device",
-            interval = (r["interval"] as? JsonPrimitive)?.intOrNull ?: 5,
-            expiresIn = (r["expires_in"] as? JsonPrimitive)?.intOrNull ?: 900,
+            deviceCode = res.str("device_code") ?: throw ProviderException(500, "GitHub didn't return a code."),
+            userCode = res.str("user_code").orEmpty(),
+            verificationUri = res.str("verification_uri") ?: "https://github.com/login/device",
+            interval = (res["interval"] as? JsonPrimitive)?.intOrNull ?: 5,
+            expiresIn = (res["expires_in"] as? JsonPrimitive)?.intOrNull ?: 900,
         )
     }
 
@@ -60,14 +70,19 @@ object GitHubLogin {
         val deadline = System.currentTimeMillis() + code.expiresIn * 1000L
         while (System.currentTimeMillis() < deadline) {
             delay(interval * 1000L)
-            val r = postForm(
+            // Keep waiting through brief network drops (e.g. switching between WiFi and mobile data).
+            val r = try {
+                postForm(
                 "https://github.com/login/oauth/access_token",
                 mapOf(
                     "client_id" to clientId,
                     "device_code" to code.deviceCode,
                     "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
-                ),
-            )
+                    ),
+                )
+            } catch (e: java.io.IOException) {
+                continue
+            }
             r.str("access_token")?.let { return it }
             when (r.str("error")) {
                 "authorization_pending", null -> Unit

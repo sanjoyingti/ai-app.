@@ -266,7 +266,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun refreshGithubUser() {
         val token = keys.getExtra("GITHUB")
         viewModelScope.launch {
-            runCatching { com.aiapp.builder.GitHubClient(token).login() }.onSuccess {
+            var result: Result<String> = Result.failure(Exception())
+            for (attempt in 0 until 3) {
+                result = runCatching { com.aiapp.builder.GitHubClient(token).login() }
+                if (result.isSuccess) break
+                kotlinx.coroutines.delay(3000)
+            }
+            result.onSuccess {
                 githubUser = it
                 keys.setExtra("GITHUB_USER", it)
             }
