@@ -21,7 +21,7 @@ Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
 
-## Status (v0.8, 7 Nov 2026)
+## Status (v0.9, 7 Nov 2026)
 
 Built and shipping from GitHub Releases (`releases/latest`):
 
@@ -32,7 +32,8 @@ Built and shipping from GitHub Releases (`releases/latest`):
 | Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
 | History | Chats saved on the phone; Chats screen; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `ui/Markdown.kt` |
 | Attachments | Photos and PDFs sent natively to Claude, Gemini, ChatGPT and OpenRouter; text/CSV/code files to every model; big files trimmed to the most relevant parts; photos shrunk to 1600 px | `llm/AttachmentContent.kt`, `data/AttachmentStore.kt` |
-| Voice | Phone speech recognizer + text-to-speech; reply read aloud then listens again; Interrupt button; voice, pitch and speed choice | `ui/Voice.kt` |
+| Voice | Full-screen live conversation with an animated orb; speaks each sentence as it's written; fast model + light thinking by default; never gets stuck (empty replies and errors go back to listening); on-device recognition with online fallback; tap the orb to interrupt; voice, pitch and speed | `ui/Voice.kt`, `ui/VoiceScreen.kt` |
+| Compile a project | Upload an Android Studio project .zip (Build screen, or attach it in chat and say "build"); unzips, creates a repo, builds with the project's own Gradle wrapper, AI fixes build errors; any model can also read the zip in chat | `builder/ZipImport.kt` |
 | Build Mode | Agent-style timeline, files and code viewer, follow-up changes on the same project, background service with notifications, stable signing key, library lookup and downloads, web lookups | `builder/` |
 | GitHub | Sign in with GitHub (device flow, OAuth app "AI App", Client ID built in); a repo is created per project | `builder/GitHubLogin.kt` |
 | Create | Images (Gemini image/Imagen, OpenAI gpt-image) and video (Gemini video models found on your key), saved to the gallery | `media/MediaGen.kt` |

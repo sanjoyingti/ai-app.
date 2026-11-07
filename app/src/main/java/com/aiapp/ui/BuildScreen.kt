@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.aiapp.builder.BuildEvent
 import com.aiapp.builder.BuildRequest
 import com.aiapp.builder.TimelineItem
@@ -252,6 +253,50 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
     var allowOther by rememberSaveable { mutableStateOf(false) }
     var problem by rememberSaveable { mutableStateOf<String?>(null) }
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var unpacking by rememberSaveable { mutableStateOf(false) }
+
+    fun ready(): String? = when {
+        chat.githubToken().isBlank() -> "Sign in with GitHub in Settings first."
+        else -> null
+    }
+
+    val pickZip = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        problem = ready()
+        if (problem != null) return@rememberLauncherForActivityResult
+        unpacking = true
+        scope.launch {
+            try {
+                val a = com.aiapp.data.AttachmentStore.import(context, uri)
+                if (!a.name.endsWith(".zip", true)) {
+                    problem = "Pick a .zip of an Android Studio project."
+                } else {
+                    if (android.os.Build.VERSION.SDK_INT >= 33) notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    vm.newProject()
+                    vm.start(
+                        BuildRequest(
+                            description = "Compile ${a.name} to an APK",
+                            appName = a.name.removeSuffix(".zip"),
+                            provider = chat.provider,
+                            model = chat.model,
+                            apiKey = chat.key(chat.provider),
+                            effort = chat.effort,
+                            githubToken = chat.githubToken(),
+                            allowOtherSites = allowOther,
+                            zipPath = a.path,
+                            zipName = a.name,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                problem = e.message ?: "Couldn't read that file."
+            } finally {
+                unpacking = false
+            }
+        }
+    }
 
     Surface(tonalElevation = 2.dp) {
         Column(
@@ -272,6 +317,16 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                 return@Column
             }
             if (project == null) {
+                OutlinedButton(
+                    onClick = { pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
+                    enabled = !unpacking,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (unpacking) "Reading project…" else "Upload Android Studio project (.zip) → APK") }
+                Text(
+                    "…or describe a new app:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },

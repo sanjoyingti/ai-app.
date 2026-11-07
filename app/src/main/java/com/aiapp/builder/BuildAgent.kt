@@ -29,6 +29,9 @@ data class BuildRequest(
     val allowOtherSites: Boolean,
     /** Continue this project instead of starting a new one. */
     val project: Project? = null,
+    /** An uploaded Android Studio project (.zip) to build instead of writing a new app. */
+    val zipPath: String? = null,
+    val zipName: String? = null,
 )
 
 data class BuildResult(
@@ -51,7 +54,11 @@ class BuildAgent(
     private val gh = GitHubClient(req.githubToken)
     private val slug = (req.project?.appName ?: req.appName).lowercase().replace(Regex("[^a-z0-9]+"), "").ifEmpty { "app" }.take(30)
     private val packageName = req.project?.packageName ?: ("com.aibuilt." + (if (slug.first().isLetter()) slug else "a$slug"))
-    private val appName = req.project?.appName ?: req.appName
+    private val appName get() = req.project?.appName ?: importedName ?: req.appName
+
+    private val imported = req.project?.imported == true || req.zipPath != null
+    private val workflowFile = if (imported) ProjectTemplate.IMPORT_WORKFLOW_FILE else "build.yml"
+    private var importedName: String? = null
 
     private val files = linkedMapOf<String, String>().apply { req.project?.files?.let { putAll(it) } }
     private val deps = linkedSetOf<String>().apply { req.project?.deps?.let { addAll(it) } }
@@ -76,7 +83,22 @@ class BuildAgent(
         val existing = req.project
         val repo: GitHubClient.Repo
         var notes: List<String>
-        if (existing == null) {
+        if (existing == null && req.zipPath != null) {
+            step(BuildEvent.Kind.STEP, "Unpacking ${req.zipName ?: "the project"}")
+            val zip = withContext(Dispatchers.IO) { ZipImport.read(java.io.File(req.zipPath), req.zipName ?: "project") }
+            importedName = zip.name
+            zip.files.forEach { (path, bytes) ->
+                pendingFiles[path] = bytes
+                if (ZipImport.isText(path) && bytes.size < 200_000) files[path] = bytes.toString(Charsets.UTF_8)
+            }
+            pendingFiles[".github/workflows/${ProjectTemplate.IMPORT_WORKFLOW_FILE}"] = ProjectTemplate.importWorkflow.toByteArray()
+            step(BuildEvent.Kind.STEP, "Found ${zip.files.size} files in \"${zip.name}\"" + if (zip.skipped > 0) " (skipped ${zip.skipped} build/cache files)" else "")
+            val repoName = zip.name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "project" }.take(40) +
+                "-" + SimpleDateFormat("yyMMdd-HHmm", Locale.US).format(Date())
+            step(BuildEvent.Kind.STEP, "Creating GitHub repo $repoName")
+            repo = gh.createRepo(repoName, "Uploaded to AI App: ${zip.name}")
+            notes = emptyList()
+        } else if (existing == null) {
             step(BuildEvent.Kind.THINKING, "Planning and writing the app with ${req.provider.label}")
             notes = apply(ask(firstPrompt()))
             if (files.isEmpty()) {
@@ -110,9 +132,12 @@ class BuildAgent(
             val message = when {
                 round > 0 -> "Fix build errors (round $round)"
                 existing != null -> "Change: ${req.description.take(60)}"
+                req.zipPath != null -> "Uploaded project from AI App"
                 else -> "Initial app from AI App"
             }
-            val sha = gh.commit(repo, pendingFiles.toMap(), message)
+            val sha = gh.commit(repo, pendingFiles.toMap(), message) { n ->
+                step(BuildEvent.Kind.STEP, "Uploaded $n of ${pendingFiles.size} files")
+            }
             pendingFiles.clear()
 
             step(BuildEvent.Kind.BUILD, "Building the APK on GitHub (usually 3–5 minutes)")
@@ -129,7 +154,16 @@ class BuildAgent(
                 }
                 saveProject(repo, apk)
                 step(BuildEvent.Kind.DONE, "Done")
-                return BuildResult(true, if (existing == null) "Your app is ready." else "Your changes are built.", repo.url, apk)
+                return BuildResult(
+                    true,
+                    when {
+                        existing != null -> "Your changes are built."
+                        req.zipPath != null -> "Your project compiled to an APK."
+                        else -> "Your app is ready."
+                    },
+                    repo.url,
+                    apk,
+                )
             }
 
             if (round >= maxFixRounds) {
@@ -152,10 +186,11 @@ class BuildAgent(
                 repo = repo.name,
                 branch = repo.branch,
                 repoUrl = repo.url,
-                description = req.project?.description ?: req.description,
+                description = req.project?.description ?: req.description.ifBlank { "Uploaded project" },
                 files = files.toMap(),
                 deps = deps.toList(),
                 lastApkUrl = apk ?: req.project?.lastApkUrl,
+                imported = imported,
             ),
         )
     }
@@ -166,7 +201,8 @@ class BuildAgent(
      */
     private suspend fun ask(prompt: String): String {
         val effort = if (req.effort == Effort.AUTO) Effort.HIGH else req.effort
-        val system = ProjectTemplate.systemPrompt(packageName) + ProjectTemplate.webInstructions
+        val system = (if (imported) ProjectTemplate.importedSystemPrompt else ProjectTemplate.systemPrompt(packageName)) +
+            ProjectTemplate.webInstructions
         val cap = if (req.provider == ProviderId.OFFLINE) 3_000 else 8_000
         val working = mutableListOf(ChatMessage(Role.USER, prompt))
         var steps = 0
@@ -210,9 +246,23 @@ class BuildAgent(
         App name: $appName
     """.trimIndent()
 
-    private fun StringBuilder.appendFiles() {
+    /** Files most likely to matter first: ones named in [hint] (errors or the request), then build files, then sources. */
+    private fun prioritized(hint: String): List<Map.Entry<String, String>> {
+        val h = hint.lowercase()
+        return files.entries.sortedBy { (path, _) ->
+            val name = path.substringAfterLast('/').lowercase()
+            when {
+                h.contains(path.lowercase()) || h.contains(name) -> 0
+                name.startsWith("build.gradle") || name.startsWith("settings.gradle") || name == "libs.versions.toml" -> 1
+                name == "androidmanifest.xml" || name.endsWith(".kt") || name.endsWith(".java") -> 2
+                else -> 3
+            }
+        }
+    }
+
+    private fun StringBuilder.appendFiles(hint: String = "") {
         var budget = 60_000
-        files.forEach { (path, content) ->
+        prioritized(hint).forEach { (path, content) ->
             if (budget <= 0) return@forEach
             val c = content.take(budget)
             budget -= c.length
@@ -224,10 +274,10 @@ class BuildAgent(
     }
 
     private fun changePrompt() = buildString {
-        appendLine("Here is an existing Android app, \"$appName\" (originally: ${req.project?.description}).")
+        appendLine("Here is an existing Android app, \"$appName\" (${if (imported) "uploaded by the user" else "originally: ${req.project?.description}"}).")
         appendLine()
         appendLine("Current files:")
-        appendFiles()
+        appendFiles(req.description)
         appendLine()
         appendLine("Make this change: ${req.description}")
         appendLine()
@@ -249,7 +299,7 @@ class BuildAgent(
         }
         appendLine()
         appendLine("Current files:")
-        appendFiles()
+        appendFiles(errors)
         appendLine()
         appendLine("Reply with every file you change, in full, in the same format. Files you don't send stay as they are.")
         appendLine("To delete a file, send it with the single line: DELETE")
@@ -261,8 +311,9 @@ class BuildAgent(
         val parsed = parse(output)
         if (parsed.truncated) notes += "Your last reply was cut off. Send fewer or shorter files."
         parsed.files.forEach { (path, content) ->
-            if (!path.startsWith("app/src/main/") || path.contains("..")) {
-                notes += "Ignored $path: only files under app/src/main/ are allowed."
+            val allowed = if (imported) !path.startsWith(".github/") && !path.endsWith(".jar") else path.startsWith("app/src/main/")
+            if (!allowed || path.contains("..") || path.startsWith("/")) {
+                notes += if (imported) "Ignored $path: .github/ and the wrapper jar can't be changed." else "Ignored $path: only files under app/src/main/ are allowed."
             } else if (content.trim() == "DELETE") {
                 if (files.remove(path) != null) pendingFiles[path] = null
             } else if (files[path] != content) {
@@ -270,7 +321,8 @@ class BuildAgent(
                 pendingFiles[path] = content.toByteArray()
             }
         }
-        parsed.deps.forEach { d ->
+        if (imported && parsed.deps.isNotEmpty()) notes += "Add libraries by editing the module's build.gradle(.kts) directly."
+        if (!imported) parsed.deps.forEach { d ->
             val resolved = resolveDependency(d)
             if (resolved == null) {
                 notes += "Dependency $d was not found on Maven; use a different library."
@@ -289,7 +341,7 @@ class BuildAgent(
         var run: GitHubClient.Run? = null
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < 35 * 60_000) {
-            run = runCatching { gh.runFor(repo, sha) }.getOrNull() ?: run
+            run = runCatching { gh.runFor(repo, sha, workflowFile) }.getOrNull() ?: run
             if (run == null && System.currentTimeMillis() - start > 3 * 60_000) return null
             if (run?.status == "completed") return run
             delay(10_000)

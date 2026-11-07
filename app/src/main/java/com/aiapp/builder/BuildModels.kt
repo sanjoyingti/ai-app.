@@ -35,4 +35,6 @@ data class Project(
     val files: Map<String, String> = emptyMap(),
     val deps: List<String> = emptyList(),
     val lastApkUrl: String? = null,
+    /** Uploaded from a .zip rather than written by the app (any file can be edited; own build setup). */
+    val imported: Boolean = false,
 )

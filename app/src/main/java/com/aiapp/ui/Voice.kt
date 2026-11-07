@@ -31,6 +31,9 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
     private var onSpoken: (() -> Unit)? = null
 
     var state by mutableStateOf(VoiceState.IDLE)
+    /** Microphone loudness 0..1, for the orb animation. */
+    var level by mutableStateOf(0f)
+        private set
     var partial by mutableStateOf("")
         private set
     var error by mutableStateOf<String?>(null)
@@ -98,6 +101,8 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
         applyVoice()
     }
 
+    private var preferOffline = true
+
     /** Listens once; [onText] gets what you said (nothing if you stayed silent). */
     fun listen(onText: (String) -> Unit) {
         stopSpeaking()
@@ -109,7 +114,11 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) { state = VoiceState.LISTENING }
             override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onRmsChanged(rmsdB: Float) {
+                // Roughly -2..10 dB from the recognizer → 0..1, smoothed.
+                val target = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                level = level * 0.6f + target * 0.4f
+            }
             override fun onBufferReceived(buffer: ByteArray?) = Unit
             override fun onEndOfSpeech() = Unit
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -127,11 +136,18 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
                 }
             }
             override fun onError(code: Int) {
+                // On-device recognition not installed: switch to online recognition and try again.
+                if (preferOffline && code in listOf(12, 13, SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_CLIENT)) {
+                    preferOffline = false
+                    main.post { listen(onText) }
+                    return
+                }
                 partial = ""
                 state = VoiceState.IDLE
                 error = when (code) {
                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Didn't catch that. Tap the mic to try again."
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Allow microphone access to use voice."
+                    SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE, SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
                     SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
                         "Speech recognition needs internet, or download your language for offline use in the phone's voice settings."
                     else -> "Voice input error ($code). Tap the mic to try again."
@@ -142,14 +158,50 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            // Answer sooner after you stop talking, and use on-device recognition when installed (faster).
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 500L)
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
         state = VoiceState.LISTENING
         r.startListening(intent)
+    }
+
+    /** Shows a problem on the voice screen (e.g. a missing key). */
+    fun showError(message: String) {
+        error = message
+        if (state == VoiceState.THINKING) state = VoiceState.IDLE
     }
 
     fun stopListening() {
         recognizer?.cancel()
         partial = ""
         if (state == VoiceState.LISTENING) state = VoiceState.IDLE
+    }
+
+    private var queued = 0
+
+    /** Speaks one piece of a reply that is still being written (queued after earlier pieces). */
+    fun enqueue(text: String) {
+        val clean = plain(text)
+        if (clean.isBlank()) return
+        if (state != VoiceState.SPEAKING) {
+            state = VoiceState.SPEAKING
+            applyVoice()
+        }
+        clean.chunked(3_500).forEach { tts.speak(it, if (queued == 0 && !tts.isSpeaking) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "q${queued++}") }
+    }
+
+    /** Call when the reply is complete; [onDone] runs after the last queued piece has been spoken. */
+    fun endOfReply(onDone: () -> Unit) {
+        if (queued == 0 && !tts.isSpeaking) {
+            queued = 0
+            state = VoiceState.IDLE
+            onDone()
+            return
+        }
+        onSpoken = onDone
+        state = VoiceState.SPEAKING
+        tts.playSilentUtterance(1, TextToSpeech.QUEUE_ADD, LAST)
     }
 
     /** Reads [text] aloud; [onDone] runs when it finishes (not when interrupted). */
@@ -170,6 +222,7 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
     }
 
     private fun finishSpeaking() {
+        queued = 0
         if (state != VoiceState.SPEAKING) return
         state = VoiceState.IDLE
         val done = onSpoken
@@ -180,6 +233,7 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
     /** Stops talking immediately (interrupt). */
     fun stopSpeaking() {
         onSpoken = null
+        queued = 0
         if (tts.isSpeaking) tts.stop()
         if (state == VoiceState.SPEAKING) state = VoiceState.IDLE
     }

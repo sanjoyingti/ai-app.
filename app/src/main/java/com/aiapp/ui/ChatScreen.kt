@@ -74,8 +74,21 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> vm.attach(uris) }
 
+    LaunchedEffect(vm.openBuild) {
+        if (vm.openBuild) {
+            vm.openBuild = false
+            onOpenBuild()
+        }
+    }
+
+    // What has already been read aloud from the reply being written.
+    var spoken by remember { mutableStateOf("") }
+    var saidWait by remember { mutableStateOf(false) }
+
     fun startListening() {
-        voice.listen { said -> vm.send(said) }
+        spoken = ""
+        saidWait = false
+        voice.listen { said -> vm.sendVoice(said) }
     }
 
     val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -84,25 +97,91 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
         if (granted) {
             voiceMode = true
             spokenCount = vm.messages.size
+            vm.warmUp()
             startListening()
         }
     }
 
-    // Voice mode: when a reply finishes, read it aloud, then listen again.
-    LaunchedEffect(vm.streaming, voiceMode) {
+    // Voice mode: read each finished sentence aloud while the reply is still being written.
+    LaunchedEffect(vm.streamingText, voiceMode) {
+        if (!voiceMode || !vm.streaming) return@LaunchedEffect
+        val live = vm.streamingText
+        if (live.contains("<search", true) || live.contains("<fetch", true) || live.contains("<download", true)) {
+            if (!saidWait) {
+                saidWait = true
+                voice.enqueue("One moment, let me check.")
+            }
+            return@LaunchedEffect
+        }
+        if (!live.startsWith(spoken)) spoken = ""
+        val rest = live.substring(spoken.length)
+        val end = Regex("[.!?।][\"')\\]]?\\s|\n").findAll(rest).lastOrNull()?.range?.last ?: return@LaunchedEffect
+        val piece = rest.substring(0, end + 1)
+        if (piece.trim().length < 12) return@LaunchedEffect
+        voice.enqueue(piece)
+        spoken += piece
+    }
+
+    // Problems (missing key, network…) show on the voice screen instead of leaving it stuck.
+    LaunchedEffect(vm.error, voiceMode) {
+        val e = vm.error
+        if (voiceMode && e != null) voice.showError(e)
+    }
+
+    // When the reply is complete: speak whatever is left, then listen again.
+    LaunchedEffect(vm.replyCount, voiceMode) {
         if (!voiceMode || vm.streaming) return@LaunchedEffect
         val last = vm.messages.lastOrNull()
-        if (last != null && last.role == Role.ASSISTANT && vm.messages.size > spokenCount) {
+        if (last == null || last.role != Role.ASSISTANT || vm.messages.size <= spokenCount) {
+            // No new reply (empty answer or an error): don't hang, go back to listening.
+            if (voice.state == VoiceState.THINKING || voice.state == VoiceState.SPEAKING) {
+                voice.endOfReply { if (voiceMode && vm.error == null) startListening() }
+            }
+            return@LaunchedEffect
+        }
+        run {
             spokenCount = vm.messages.size
-            voice.speak(last.text) { if (voiceMode) startListening() }
-        } else if (voice.state == VoiceState.THINKING && vm.error != null) {
-            voice.state = VoiceState.IDLE
+            val remainder = when {
+                spoken.isEmpty() -> last.text
+                last.text.startsWith(spoken) -> last.text.removePrefix(spoken)
+                else -> ""
+            }
+            voice.enqueue(remainder)
+            spoken = ""
+            voice.endOfReply { if (voiceMode) startListening() }
         }
     }
 
     LaunchedEffect(vm.messages.size, vm.streamingText.length, vm.streaming) {
         val count = vm.messages.size + if (vm.streaming) 1 else 0
         if (count > 0) listState.scrollToItem(count - 1)
+    }
+
+    if (voiceMode) {
+        val lastReply = vm.messages.lastOrNull { it.role == Role.ASSISTANT }?.text.orEmpty()
+        VoiceScreen(
+            voice = voice,
+            thinking = vm.streaming,
+            caption = if (vm.streaming) VoiceController.plain(vm.streamingText).takeLast(220) else VoiceController.plain(lastReply).take(220),
+            modelLabel = vm.voiceModel().let { id -> "${vm.provider.label} · ${vm.models.firstOrNull { it.id == id }?.name ?: id}" },
+            fastModel = vm.voiceFastModel,
+            onToggleFast = vm::toggleVoiceFastModel,
+            onTalk = {
+                vm.stop()
+                startListening()
+            },
+            onExit = {
+                voiceMode = false
+                voice.stopListening()
+                voice.stopSpeaking()
+            },
+        )
+        androidx.activity.compose.BackHandler {
+            voiceMode = false
+            voice.stopListening()
+            voice.stopSpeaking()
+        }
+        return
     }
 
     Scaffold(
@@ -121,21 +200,7 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
             )
         },
         bottomBar = {
-            if (voiceMode) {
-                VoicePanel(
-                    voice = voice,
-                    streaming = vm.streaming,
-                    onTalk = {
-                        vm.stop()
-                        startListening()
-                    },
-                    onExit = {
-                        voiceMode = false
-                        voice.stopListening()
-                        voice.stopSpeaking()
-                    },
-                )
-            } else {
+            run {
                 Composer(
                     vm = vm,
                     text = input,
@@ -165,7 +230,7 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(vm.messages) { MessageBubble(it) }
+                items(vm.messages) { MessageBubble(it, onBuildZip = vm::buildZip) }
                 if (vm.streaming) {
                     item {
                         Column {
@@ -286,10 +351,13 @@ private fun ErrorBanner(message: String, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(message: ChatMessage, onBuildZip: (com.aiapp.llm.Attachment) -> Unit = {}) {
     if (message.role == Role.USER) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-            message.attachments.forEach { a -> AttachmentChip(a, onRemove = null) }
+            message.attachments.forEach { a ->
+                AttachmentChip(a, onRemove = null)
+                if (a.isZip) TextButton(onClick = { onBuildZip(a) }) { Text("Build APK from this project") }
+            }
             if (message.text.isNotBlank()) {
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -333,7 +401,7 @@ private fun AttachmentChip(a: com.aiapp.llm.Attachment, onRemove: (() -> Unit)?)
                 }
             }
             Text(
-                (if (a.isImage) "" else if (a.isPdf) "PDF · " else "File · ") + a.name,
+                (if (a.isImage) "" else if (a.isPdf) "PDF · " else if (a.isZip) "Project · " else "File · ") + a.name,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -383,67 +451,6 @@ private fun Composer(
                     vm.streaming -> Button(onClick = vm::stop) { Text("Stop") }
                     text.isBlank() && vm.pendingAttachments.isEmpty() -> OutlinedButton(onClick = onVoice) { Text("🎙") }
                     else -> Button(onClick = onSend) { Text("Send") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VoicePanel(voice: VoiceController, streaming: Boolean, onTalk: () -> Unit, onExit: () -> Unit) {
-    var showVoices by remember { mutableStateOf(false) }
-    Surface(tonalElevation = 3.dp) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            val label = when {
-                voice.state == VoiceState.LISTENING -> "Listening…"
-                voice.state == VoiceState.SPEAKING -> "Speaking — tap Interrupt to talk"
-                streaming || voice.state == VoiceState.THINKING -> "Thinking…"
-                else -> "Tap Talk and speak"
-            }
-            Text(label, style = MaterialTheme.typography.titleMedium)
-            if (voice.partial.isNotBlank()) Text("“${voice.partial}”", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            voice.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (voice.state) {
-                    VoiceState.SPEAKING -> Button(onClick = onTalk) { Text("Interrupt") }
-                    VoiceState.LISTENING -> OutlinedButton(onClick = voice::stopListening) { Text("Stop listening") }
-                    else -> Button(onClick = onTalk, enabled = !streaming) { Text("🎙 Talk") }
-                }
-                OutlinedButton(onClick = { showVoices = !showVoices }) { Text("Voice") }
-                TextButton(onClick = onExit) { Text("Exit") }
-            }
-            if (showVoices) {
-                Text("Pitch", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Deeper" to 0.8f, "Normal" to 1.0f, "Higher" to 1.2f).forEach { (n, p) ->
-                        FilterChip(selected = voice.pitch == p, onClick = { voice.choosePitch(p) }, label = { Text(n) })
-                    }
-                }
-                Text("Speed", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Slow" to 0.8f, "Normal" to 1.0f, "Fast" to 1.25f).forEach { (n, r) ->
-                        FilterChip(selected = voice.rate == r, onClick = { voice.chooseRate(r) }, label = { Text(n) })
-                    }
-                }
-                Text(
-                    "Voices on this phone (tap to hear; names often say male/female or a letter code):",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                    voice.voices.forEach { v ->
-                        FilterChip(
-                            selected = voice.voiceName == v.name,
-                            onClick = { voice.selectVoice(v) },
-                            label = { Text("${v.locale.displayName} · ${v.name}" + if (v.isNetworkConnectionRequired) " (online)" else "") },
-                        )
-                    }
                 }
             }
         }

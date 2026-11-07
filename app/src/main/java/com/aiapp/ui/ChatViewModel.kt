@@ -355,9 +355,89 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(text: String) {
+    /** Set when chat starts a build, so the screen can switch to Build. */
+    var openBuild by mutableStateOf(false)
+
+    private val buildWords = Regex("\\b(apk|build|compile|compil)", RegexOption.IGNORE_CASE)
+
+    /** Compiles an uploaded Android Studio project (.zip) into an APK on GitHub. */
+    fun buildZip(zip: com.aiapp.llm.Attachment) {
+        val token = githubToken()
+        if (token.isBlank()) {
+            error = "Sign in with GitHub in Settings first, then try again."
+            return
+        }
+        if (com.aiapp.builder.BuildRunner.running) {
+            error = "A build is already running. Open Build to see it."
+            return
+        }
+        val app = getApplication<Application>()
+        com.aiapp.builder.BuildRunner.newProject(app)
+        com.aiapp.builder.BuildService.start(
+            app,
+            com.aiapp.builder.BuildRequest(
+                description = "Compile ${zip.name} to an APK",
+                appName = zip.name.removeSuffix(".zip"),
+                provider = provider,
+                model = model,
+                apiKey = keys.get(provider),
+                effort = effort,
+                githubToken = token,
+                allowOtherSites = false,
+                zipPath = zip.path,
+                zipName = zip.name,
+            ),
+        )
+        messages += ChatMessage(
+            Role.ASSISTANT,
+            "Building **${zip.name}** into an APK on your GitHub. If the build hits errors, ${provider.label} will try to fix them. " +
+                "Follow the progress on the Build screen; you'll also get a notification when it's ready.",
+        )
+        persist()
+        openBuild = true
+    }
+
+    /** Use the provider's fastest smart model for voice (on by default). */
+    var voiceFastModel by mutableStateOf(prefs.getBoolean("voice_fast", true))
+        private set
+
+    fun toggleVoiceFastModel() {
+        voiceFastModel = !voiceFastModel
+        prefs.edit().putBoolean("voice_fast", voiceFastModel).apply()
+    }
+
+    /** The model voice turns use: a quick one from the same provider when "fast" is on. */
+    fun voiceModel(): String {
+        if (!voiceFastModel) return model
+        val ids = models.map { it.id }
+        fun pick(vararg keys: String, exclude: List<String> = emptyList()) =
+            keys.firstNotNullOfOrNull { k -> ids.firstOrNull { id -> id.contains(k) && exclude.none { id.contains(it) } } }
+        val fast = when (provider) {
+            ProviderId.CLAUDE -> pick("haiku", "sonnet")
+            ProviderId.GEMINI -> pick("flash", exclude = listOf("lite", "image", "tts", "live", "audio"))
+            ProviderId.OPENAI -> pick("mini", exclude = listOf("audio", "realtime", "tts", "transcribe", "search"))
+            else -> null
+        }
+        return fast ?: model
+    }
+
+    /** Voice turns: short spoken answers, a fast model and light thinking, so replies start quickly. */
+    fun sendVoice(text: String) = send(text, voice = true)
+
+    /** Loads the offline model ahead of time so the first voice reply doesn't wait for it. */
+    fun warmUp() {
+        if (provider != ProviderId.OFFLINE || model.isBlank()) return
+        viewModelScope.launch(Dispatchers.Default) { runCatching { Providers.offline.preload(model) } }
+    }
+
+    /** Counts finished replies (including empty or failed ones), so voice mode knows when to listen again. */
+    var replyCount by mutableStateOf(0)
+        private set
+
+    fun send(text: String, voice: Boolean = false) {
         val trimmed = text.trim()
-        if ((trimmed.isEmpty() && pendingAttachments.isEmpty()) || streaming) return
+        if (streaming) stop()
+        if (trimmed.isEmpty() && pendingAttachments.isEmpty()) return
         val k = keys.get(provider)
         if (provider.needsKey && k.isBlank()) {
             error = "Add your ${provider.label} API key in Settings."
@@ -368,18 +448,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         error = null
-        messages += ChatMessage(Role.USER, trimmed, pendingAttachments.toList())
+        val attached = pendingAttachments.toList()
+        val zip = attached.firstOrNull { it.isZip }
+        if (zip != null && buildWords.containsMatchIn(trimmed)) {
+            messages += ChatMessage(Role.USER, trimmed, attached)
+            pendingAttachments.clear()
+            buildZip(zip)
+            return
+        }
+        messages += ChatMessage(Role.USER, trimmed, attached)
         pendingAttachments.clear()
         val history = messages.toList()
         val p = provider
-        val m = model
-        val e = effort
+        val m = if (voice) voiceModel() else model
+        // Voice: light thinking so the first words come almost immediately.
+        val e = if (voice) Effort.LOW else effort
 
         streaming = true
         streamingText = ""
         status = if (p == ProviderId.OFFLINE) "Loading offline model…" else "Thinking…"
         val web = webEnabled
-        val system = if (web) SYSTEM_PROMPT + WebTools.instructions(today()) else SYSTEM_PROMPT
+        val base = if (voice) SYSTEM_PROMPT + VOICE_PROMPT else SYSTEM_PROMPT
+        val system = if (web) base + WebTools.instructions(today()) else base
         job = viewModelScope.launch {
             try {
                 val working = history.toMutableList()
@@ -392,7 +482,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         if (status != "Writing…") status = "Writing…"
                         streamingText += delta
                     }
-                    if (!web || steps >= MAX_WEB_STEPS) break
+                    if (!web || steps >= (if (voice) 1 else MAX_WEB_STEPS)) break
                     // (Offline models get the same number of lookups; they're cheap.)
                     val reply = streamingText
                     val search = WebTools.searchTag.find(reply)?.groupValues?.get(1)?.trim()
@@ -452,6 +542,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         streamingText = ""
         status = null
         streaming = false
+        replyCount++
     }
 
     private fun friendly(t: Throwable): String = when {
@@ -469,6 +560,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MAX_WEB_STEPS = 6
+
+        const val VOICE_PROMPT =
+            " This is a live voice conversation and your reply is read aloud. Talk like a warm, sharp, " +
+                "knowledgeable friend: natural spoken sentences, contractions, no lists, headings, tables, " +
+                "code or emoji. Lead with the answer. Keep it short (one to three sentences) for simple " +
+                "questions; give more detail when the user asks for it or the question needs it. Use what " +
+                "was said earlier in the conversation. If something is ambiguous, ask one quick question. " +
+                "Only search the web when the question needs current information."
 
         const val SYSTEM_PROMPT =
             "You are a helpful assistant in a mobile app. Answer clearly and concisely. " +

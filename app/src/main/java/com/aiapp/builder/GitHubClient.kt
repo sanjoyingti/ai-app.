@@ -75,7 +75,12 @@ class GitHubClient(private val token: String) {
      * Commits [files] (path → content, or null to delete) on top of the branch in one commit.
      * Returns the commit SHA.
      */
-    suspend fun commit(repo: Repo, files: Map<String, ByteArray?>, message: String): String {
+    suspend fun commit(
+        repo: Repo,
+        files: Map<String, ByteArray?>,
+        message: String,
+        onProgress: (Int) -> Unit = {},
+    ): String {
         val base = "/repos/${repo.owner}/${repo.name}"
         // auto_init can take a moment before the branch exists.
         var ref: JsonElement? = null
@@ -89,7 +94,9 @@ class GitHubClient(private val token: String) {
         val baseTree = call("GET", "$base/git/commits/$headSha").obj("tree")
             ?.let { (it["sha"] as? JsonPrimitive)?.contentOrNull }
 
+        var done = 0
         val entries = files.map { (path, bytes) ->
+            if (++done % 50 == 0) onProgress(done)
             val blob = bytes?.let {
                 call("POST", "$base/git/blobs", buildJsonObject {
                     put("content", Base64.getEncoder().encodeToString(it))
@@ -104,7 +111,7 @@ class GitHubClient(private val token: String) {
                 entries.forEach { (path, sha) ->
                     addJsonObject {
                         put("path", path)
-                        put("mode", if (path == "gradlew") "100755" else "100644")
+                        put("mode", if (path == "gradlew" || path.endsWith("/gradlew") || path.endsWith(".sh")) "100755" else "100644")
                         put("type", "blob")
                         if (sha == null) put("sha", JsonNull) else put("sha", sha)
                     }
@@ -123,10 +130,13 @@ class GitHubClient(private val token: String) {
     data class Run(val id: Long, val status: String, val conclusion: String?, val url: String)
 
     /** The Actions run started by the push of [sha], or null if it hasn't appeared yet. */
-    suspend fun runFor(repo: Repo, sha: String): Run? {
-        val runs = call("GET", "/repos/${repo.owner}/${repo.name}/actions/runs?head_sha=$sha&per_page=5")
+    /** The run of [workflowFile] (e.g. "build.yml") for [sha]; other workflows in the repo are ignored. */
+    suspend fun runFor(repo: Repo, sha: String, workflowFile: String? = null): Run? {
+        val runs = call("GET", "/repos/${repo.owner}/${repo.name}/actions/runs?head_sha=$sha&per_page=20")
             .let { (it as? JsonObject)?.get("workflow_runs") as? JsonArray } ?: return null
-        val r = runs.firstOrNull() as? JsonObject ?: return null
+        val r = runs.mapNotNull { it as? JsonObject }.firstOrNull { run ->
+            workflowFile == null || (run["path"] as? JsonPrimitive)?.contentOrNull?.endsWith(workflowFile) == true
+        } ?: return null
         return Run(
             id = (r["id"] as? JsonPrimitive)?.longOrNull ?: return null,
             status = (r["status"] as? JsonPrimitive)?.contentOrNull ?: "queued",

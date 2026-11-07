@@ -14,6 +14,7 @@ import java.util.UUID
 /** Copies picked files into the app's storage and extracts text from text-like files. */
 object AttachmentStore {
     private const val MAX_BYTES = 30L * 1024 * 1024
+    private const val MAX_ZIP = 150L * 1024 * 1024
     private const val MAX_TEXT = 2_000_000
     private const val MAX_IMAGE_SIDE = 1600
 
@@ -33,8 +34,10 @@ object AttachmentStore {
                 if (!c.isNull(1)) size = c.getLong(1)
             }
         }
-        if (size > MAX_BYTES) throw IllegalArgumentException("$name is larger than 30 MB.")
         val ext = name.substringAfterLast('.', "").lowercase()
+        if (size > (if (ext == "zip") MAX_ZIP else MAX_BYTES)) {
+            throw IllegalArgumentException("$name is larger than ${if (ext == "zip") 150 else 30} MB.")
+        }
         var mime = resolver.getType(uri) ?: "application/octet-stream"
         if (mime == "application/octet-stream" && ext in textExtensions) mime = "text/plain"
         if (ext == "pdf") mime = "application/pdf"
@@ -52,6 +55,11 @@ object AttachmentStore {
                 Attachment(name, if (shrunk) "image/jpeg" else mime, out.absolutePath)
             }
             mime == "application/pdf" -> Attachment(name, mime, out.absolutePath)
+            ext == "zip" -> {
+                // Projects: keep the zip (for building) and a readable summary (for any model to read).
+                val summary = runCatching { com.aiapp.builder.ZipImport.summary(out) }.getOrNull()
+                Attachment(name, "application/zip", out.absolutePath, summary)
+            }
             mime.startsWith("text/") || ext in textExtensions || mime.contains("json") || mime.contains("xml") -> {
                 val text = out.readText().take(MAX_TEXT)
                 Attachment(name, "text/plain", out.absolutePath, text)

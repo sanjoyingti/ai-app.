@@ -170,6 +170,69 @@ object ProjectTemplate {
         </manifest>
     """.trimIndent()
 
+    /** Workflow added to uploaded projects; uses the project's own Gradle wrapper when it has one. */
+    const val IMPORT_WORKFLOW_FILE = "ai-app-build.yml"
+
+    val importWorkflow = """
+        name: AI App build
+        on:
+          push:
+          workflow_dispatch:
+        permissions:
+          contents: write
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            timeout-minutes: 45
+            steps:
+              - uses: actions/checkout@v4
+              - uses: actions/setup-java@v4
+                with:
+                  distribution: temurin
+                  java-version: "17"
+              - uses: gradle/actions/setup-gradle@v4
+                with:
+                  gradle-version: "8.14.3"
+              - name: Build debug APK
+                run: |
+                  set -o pipefail
+                  if [ -f gradlew ]; then
+                    chmod +x gradlew
+                    ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
+                  else
+                    gradle assembleDebug --stacktrace 2>&1 | tee build.log
+                  fi
+              - name: Collect APK
+                run: |
+                  APK=${'$'}(find . -path "*/build/outputs/apk/*" -name "*.apk" | head -n 1)
+                  if [ -z "${'$'}APK" ]; then echo "No APK was produced"; exit 1; fi
+                  cp "${'$'}APK" app-${'$'}{{ github.run_number }}.apk
+              - uses: softprops/action-gh-release@v2
+                with:
+                  tag_name: build-${'$'}{{ github.run_number }}
+                  name: Build ${'$'}{{ github.run_number }}
+                  files: app-*.apk
+                  make_latest: true
+    """.trimIndent()
+
+    val importedSystemPrompt = """
+        You are an expert Android developer working on an existing Android Studio project (Gradle, Kotlin or Java).
+        You fix build errors and make the changes the user asks for, keeping the project's existing style and setup.
+
+        Output ONLY changed or new files, in this format:
+
+        === FILE: path/from/project/root ===
+        (full file content)
+        === END FILE ===
+
+        Rules:
+        - Paths are relative to the project root (where settings.gradle is), e.g. app/src/main/java/... or app/build.gradle.kts.
+        - Write every file you send in full. No placeholders, no "..." and no TODOs.
+        - To add a library, edit the module's build.gradle(.kts) dependencies (and gradle/libs.versions.toml if the project uses it).
+        - To delete a file, send it with the single line: DELETE
+        - Don't touch .github/ or the Gradle wrapper jar.
+    """.trimIndent()
+
     /** Lets the model look things up before writing code. */
     val webInstructions = "\n\n" + """
 

@@ -228,6 +228,13 @@ class OfflineProvider(context: Context) : LlmProvider {
         engineModelId = null
     }
 
+    /** Loads [modelId] into memory now (e.g. when voice mode starts). */
+    suspend fun preload(modelId: String) {
+        val m = byId(modelId) ?: return
+        if (!isDownloaded(m)) return
+        engineLock.withLock { loadEngine(m) }
+    }
+
     /** Loads the model once and keeps it in memory; tries the GPU first and falls back to the CPU. */
     private fun loadEngine(model: OfflineModel): Engine {
         engine?.let { if (engineModelId == model.id) return it }
