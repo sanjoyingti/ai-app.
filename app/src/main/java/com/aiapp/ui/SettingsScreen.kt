@@ -64,6 +64,7 @@ fun SettingsScreen(vm: ChatViewModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             ProviderId.entries.filter { it.needsKey }.forEach { KeyField(it, vm) }
+            GithubTokenField(vm)
             OfflineSection(vm)
         }
     }
@@ -161,6 +162,42 @@ private fun OfflineRow(m: OfflineModel, vm: ChatViewModel) {
         }
         vm.downloadErrors[m.id]?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+@Composable
+private fun GithubTokenField(vm: ChatViewModel) {
+    var text by remember { mutableStateOf(vm.githubToken()) }
+    var note by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = {
+                text = it
+                note = null
+            },
+            label = { Text("GitHub token (for Build app)") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "Create a classic token at github.com/settings/tokens with the public_repo and workflow scopes.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = {
+                vm.saveGithubToken(text)
+                note = "Saved"
+            }) { Text("Save") }
+            TextButton(onClick = {
+                text = ""
+                vm.saveGithubToken("")
+                note = "Cleared"
+            }) { Text("Clear") }
+            note?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
         }
     }
 }

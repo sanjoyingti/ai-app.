@@ -21,4 +21,11 @@ class ApiKeys(context: Context) {
     fun set(provider: ProviderId, key: String) {
         prefs.edit().putString(provider.name, key.trim()).apply()
     }
+
+    /** Other secrets, such as the GitHub token Build Mode uses. */
+    fun getExtra(name: String): String = prefs.getString("extra_$name", "").orEmpty()
+
+    fun setExtra(name: String, value: String) {
+        prefs.edit().putString("extra_$name", value.trim()).apply()
+    }
 }

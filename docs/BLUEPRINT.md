@@ -1,6 +1,6 @@
 # Autonomous Mobile AI App: Master Blueprint
 
-Version 1.2 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
+Version 1.3 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
 
 ## 0. What you asked for
 
@@ -199,6 +199,16 @@ Reference implementation: `specs/VoiceSession.kt`.
 
 ## 9. Spec 2: Coding agent and build system
 
+### 9.0 Built in v0.4 (`builder/`)
+
+- **Build app** screen: app name + description → the chat's selected provider, model and Brain level write the app.
+- `ProjectTemplate.kt`: a fixed, known-good Gradle project (Compose, Material 3, navigation, coroutines, serialization, OkHttp) plus a GitHub Actions workflow that builds the debug APK and publishes it as a release. The model writes only files under `app/src/main/`.
+- `GitHubClient.kt`: creates a public repo on your account, commits all files in one commit, waits for the Actions run, and on failure pulls the logs and keeps only the error lines.
+- `BuildAgent.kt`: write → build → read errors → fix, for 1 / 3 / 6 / 10 rounds (Low / Medium / High / Max; +2 for offline models), then returns the APK download link.
+- **Internet access:** the model can request libraries (`=== DEPENDENCY: group:artifact:version ===`), and the app checks Google Maven, Maven Central and JitPack and fills in the real latest version. It can download files (`=== DOWNLOAD: url -> app/src/main/res/... ===`) up to 15 MB into res/raw, drawable, font or assets. GitHub, Google Fonts, Maven, Wikimedia and jsDelivr are allowed by default; other sites need the "Allow other sites" switch.
+- **Needs:** a GitHub classic token with `public_repo` + `workflow` scopes (Settings).
+- **Offline models** can write simple apps; the APK build itself still runs on GitHub, so it needs internet.
+
 ### 9.1 Loop
 
 Planner → Builder → Fixer → Tester → Packager, with progress lines streamed to chat.
@@ -265,7 +275,7 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 | 2 | Conversation history, Markdown rendering, Google/email login | History survives restart |
 | 3 | Voice with barge-in (Spec 1) | Stops within 150 ms when you talk |
 | 4 | File upload + RAG, image/video generation | Answers cite files; prompt → clip |
-| 5 | App-building agent via GitHub Actions (Spec 2) | Described app → installable APK link |
+| 5 ✅ (v0.4) | App-building agent via GitHub Actions (Spec 2), with library lookup and file downloads | Described app → installable APK link |
 | 6a ✅ (v0.2) | Offline Gemma 4 E4B/E2B via LiteRT-LM; most-advanced-first model picker; new Claude/ChatGPT effort settings | Chat works in airplane mode |
 | 6b ✅ (v0.3) | Biggest open models in the cloud via OpenRouter (no PC) | Kimi/DeepSeek/GLM/Qwen answer in chat |
 | 6c | llama.cpp (Qwen 3.5 GGUF) on the phone, safety module wired in | Any GGUF model runs offline |

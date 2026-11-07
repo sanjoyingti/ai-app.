@@ -122,6 +122,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun key(p: ProviderId): String = keys.get(p)
 
+    fun githubToken(): String = keys.getExtra("GITHUB")
+
+    fun saveGithubToken(value: String) = keys.setExtra("GITHUB", value)
+
     fun saveKey(p: ProviderId, value: String) {
         keys.set(p, value)
         if (p == provider) refreshModels()

@@ -10,6 +10,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aiapp.ui.AppTheme
+import com.aiapp.ui.BuildScreen
+import com.aiapp.ui.BuildViewModel
 import com.aiapp.ui.ChatScreen
 import com.aiapp.ui.ChatViewModel
 import com.aiapp.ui.SettingsScreen
@@ -22,10 +24,11 @@ class MainActivity : ComponentActivity() {
                 val vm: ChatViewModel = viewModel()
                 var screen by rememberSaveable { mutableStateOf("chat") }
                 BackHandler(enabled = screen != "chat") { screen = "chat" }
-                if (screen == "chat") {
-                    ChatScreen(vm, onOpenSettings = { screen = "settings" })
-                } else {
-                    SettingsScreen(vm, onBack = { screen = "chat" })
+                val buildVm: BuildViewModel = viewModel()
+                when (screen) {
+                    "chat" -> ChatScreen(vm, onOpenSettings = { screen = "settings" }, onOpenBuild = { screen = "build" })
+                    "build" -> BuildScreen(vm, buildVm, onBack = { screen = "chat" }, onOpenSettings = { screen = "settings" })
+                    else -> SettingsScreen(vm, onBack = { screen = "chat" })
                 }
             }
         }

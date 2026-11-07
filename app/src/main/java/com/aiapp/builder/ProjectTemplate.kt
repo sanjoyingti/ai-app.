@@ -1,0 +1,172 @@
+package com.aiapp.builder
+
+/**
+ * A known-good Gradle project that every generated app starts from. The model only writes code and
+ * resources under app/src/main, so small models (including offline Gemma) don't have to get the
+ * build setup right.
+ */
+object ProjectTemplate {
+
+    /** Files the app writes; the model is not allowed to replace these. */
+    fun files(appName: String, packageName: String, extraDeps: List<String>): Map<String, String> = mapOf(
+        "settings.gradle.kts" to """
+            pluginManagement {
+                repositories {
+                    google()
+                    mavenCentral()
+                    gradlePluginPortal()
+                }
+            }
+            dependencyResolutionManagement {
+                repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+                repositories {
+                    google()
+                    mavenCentral()
+                    maven("https://jitpack.io")
+                }
+            }
+            rootProject.name = "${appName.replace("\"", "")}"
+            include(":app")
+        """.trimIndent(),
+        "build.gradle.kts" to """
+            plugins {
+                id("com.android.application") version "8.7.3" apply false
+                id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+                id("org.jetbrains.kotlin.plugin.compose") version "2.2.20" apply false
+                id("org.jetbrains.kotlin.plugin.serialization") version "2.2.20" apply false
+            }
+        """.trimIndent(),
+        "gradle.properties" to """
+            org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
+            android.useAndroidX=true
+            kotlin.code.style=official
+            android.nonTransitiveRClass=true
+        """.trimIndent(),
+        "app/build.gradle.kts" to """
+            plugins {
+                id("com.android.application")
+                id("org.jetbrains.kotlin.android")
+                id("org.jetbrains.kotlin.plugin.compose")
+                id("org.jetbrains.kotlin.plugin.serialization")
+            }
+
+            android {
+                namespace = "$packageName"
+                compileSdk = 35
+                defaultConfig {
+                    applicationId = "$packageName"
+                    minSdk = 26
+                    targetSdk = 35
+                    versionCode = 1
+                    versionName = "1.0"
+                }
+                buildTypes { release { isMinifyEnabled = false } }
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+                buildFeatures { compose = true }
+            }
+
+            kotlin {
+                compilerOptions {
+                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+                }
+            }
+
+            dependencies {
+                val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+                implementation(composeBom)
+                implementation("androidx.core:core-ktx:1.15.0")
+                implementation("androidx.activity:activity-compose:1.9.3")
+                implementation("androidx.compose.ui:ui")
+                implementation("androidx.compose.ui:ui-tooling-preview")
+                implementation("androidx.compose.foundation:foundation")
+                implementation("androidx.compose.material3:material3")
+                implementation("androidx.compose.material:material-icons-extended")
+                implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+                implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+                implementation("androidx.navigation:navigation-compose:2.8.5")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+                implementation("com.squareup.okhttp3:okhttp:4.12.0")
+            ${extraDeps.joinToString("\n") { "    implementation(\"$it\")" }}
+            }
+        """.trimIndent(),
+        ".gitignore" to "build/\n.gradle/\nlocal.properties\n*.iml\n",
+        ".github/workflows/build.yml" to """
+            name: Build APK
+            on:
+              push:
+              workflow_dispatch:
+            permissions:
+              contents: write
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                timeout-minutes: 30
+                steps:
+                  - uses: actions/checkout@v4
+                  - uses: actions/setup-java@v4
+                    with:
+                      distribution: temurin
+                      java-version: "17"
+                  - uses: gradle/actions/setup-gradle@v4
+                    with:
+                      gradle-version: "8.14.3"
+                  - name: Build debug APK
+                    run: gradle assembleDebug --stacktrace
+                  - name: Rename APK
+                    run: cp app/build/outputs/apk/debug/app-debug.apk app-${'$'}{{ github.run_number }}.apk
+                  - uses: softprops/action-gh-release@v2
+                    with:
+                      tag_name: build-${'$'}{{ github.run_number }}
+                      name: Build ${'$'}{{ github.run_number }}
+                      files: app-*.apk
+                      make_latest: true
+        """.trimIndent(),
+    )
+
+    fun defaultManifest(appName: String): String = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <application
+                android:label="${appName.replace("\"", "")}"
+                android:supportsRtl="true"
+                android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+    """.trimIndent()
+
+    /** Rules given to the model. Kept short so small offline models can follow them. */
+    fun systemPrompt(packageName: String): String = """
+        You are an expert Android developer. You write complete, working Android apps in Kotlin with Jetpack Compose and Material 3.
+
+        The Gradle setup already exists. It includes: Compose (BOM 2024.12.01), material3, material-icons-extended, activity-compose, lifecycle-viewmodel-compose, navigation-compose, kotlinx-coroutines, kotlinx-serialization-json, okhttp. Kotlin 2.2, compileSdk 35, minSdk 26.
+        Package name: $packageName. Source folder: app/src/main/java/${packageName.replace('.', '/')}/
+        The entry point must be $packageName.MainActivity (a ComponentActivity calling setContent).
+
+        Output ONLY in this format, nothing else:
+
+        === FILE: app/src/main/java/${packageName.replace('.', '/')}/MainActivity.kt ===
+        (full file content)
+        === END FILE ===
+
+        Rules:
+        - Only write files under app/src/main/ (Kotlin sources, AndroidManifest.xml, res/ files).
+        - Write every file in full. No placeholders, no "..." and no TODOs.
+        - Only use the libraries listed above unless you add a line: === DEPENDENCY: group:artifact:version === (use "latest" as the version if unsure).
+        - To get a file from the internet (image, font, sound, JSON), add a line: === DOWNLOAD: https://url -> app/src/main/res/raw/name.ext === (res/raw, res/drawable, res/font or assets only; file names lowercase with underscores).
+        - Keep it simple and correct: prefer one or a few files. Every import must exist.
+        - If you write AndroidManifest.xml, keep MainActivity as the launcher activity.
+    """.trimIndent()
+}
