@@ -43,7 +43,7 @@ flowchart TB
     Agent["Agent controller + on-device toolchain"]
     Safety["Safety interceptor"]
   end
-  Home["Home brain: GLM / DeepSeek / Qwen on your PC"]
+  Home["Open models: Kimi / DeepSeek / GLM / Qwen via OpenRouter"]
   GW["Cloud gateway: routing, keys, spend caps"]
   LLM["Frontier models: Claude, Gemini, GPT"]
   Media["Voice + media APIs: TTS, image, video"]
@@ -128,8 +128,7 @@ Each level maps to that provider's own reasoning setting. If a model rejects a s
   - Qwen 3.5 family as the main brain: 9B needs about 8 GB RAM, with 2B/4B for smaller phones.
   - Gemma 4 E2B/E4B for vision and audio.
   - 14–27B on phones with 16 GB or more.
-- **Home brain:** GLM-5.2, DeepSeek V4 or Qwen 3.5 122B on a PC/GPU, reached over home WiFi or a private encrypted tunnel.
-- **Routing:** home brain → cloud (if online and allowed) → phone model.
+- **Routing:** cloud (if online and allowed) → phone model.
 - **Model manager:** detects RAM and chip, downloads the best fit, imports any GGUF, and unloads the model when idle.
 - **Reality check:** frontier open models (hundreds of billions of parameters) cannot run on any phone.
 
