@@ -138,8 +138,8 @@ class BuildAgent(
                     ProjectTemplate.files(appName, packageName, deps.toList()).getValue("app/build.gradle.kts").toByteArray()
                 depsChanged = false
             }
-            val count = pendingFiles.size + pendingDisk.size
-            step(BuildEvent.Kind.STEP, "Uploading $count changed file${if (count == 1) "" else "s"} to GitHub")
+            val toUpload = pendingFiles.size + pendingDisk.size
+            step(BuildEvent.Kind.STEP, "Uploading $toUpload changed file${if (toUpload == 1) "" else "s"} to GitHub")
             val message = when {
                 round > 0 -> "Fix build errors (round $round)"
                 existing != null -> "Change: ${req.description.take(60)}"
