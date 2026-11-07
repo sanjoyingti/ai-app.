@@ -79,6 +79,8 @@ class GitHubClient(private val token: String) {
         repo: Repo,
         files: Map<String, ByteArray?>,
         message: String,
+        /** Big files uploaded straight from storage, so they never have to fit in memory. */
+        diskFiles: Map<String, java.io.File> = emptyMap(),
         onProgress: (Int) -> Unit = {},
     ): String {
         val base = "/repos/${repo.owner}/${repo.name}"
@@ -105,10 +107,15 @@ class GitHubClient(private val token: String) {
             }
             path to blob
         }
+        val diskEntries = diskFiles.map { (path, file) ->
+            if (++done % 50 == 0) onProgress(done)
+            path to blobFromFile(base, file)
+        }
+        val allEntries = entries + diskEntries
         val tree = call("POST", "$base/git/trees", buildJsonObject {
             if (baseTree != null) put("base_tree", baseTree)
             putJsonArray("tree") {
-                entries.forEach { (path, sha) ->
+                allEntries.forEach { (path, sha) ->
                     addJsonObject {
                         put("path", path)
                         put("mode", if (path == "gradlew" || path.endsWith("/gradlew") || path.endsWith(".sh")) "100755" else "100644")
@@ -125,6 +132,31 @@ class GitHubClient(private val token: String) {
         }).str("sha")!!
         call("PATCH", "$base/git/refs/heads/${repo.branch}", buildJsonObject { put("sha", commit) })
         return commit
+    }
+
+    /** Creates a blob by streaming the file as base64 inside the JSON body (no big strings in memory). */
+    private suspend fun blobFromFile(base: String, file: java.io.File): String = withContext(Dispatchers.IO) {
+        val body = object : okhttp3.RequestBody() {
+            override fun contentType() = jsonType
+            override fun writeTo(sink: okio.BufferedSink) {
+                sink.writeUtf8("{\"encoding\":\"base64\",\"content\":\"")
+                val out = Base64.getEncoder().wrap(object : java.io.OutputStream() {
+                    override fun write(b: Int) { sink.writeByte(b) }
+                    override fun write(b: ByteArray, off: Int, len: Int) { sink.write(b, off, len) }
+                    override fun close() = Unit
+                })
+                file.inputStream().use { it.copyTo(out, 1 shl 16) }
+                out.close()
+                sink.writeUtf8("\"}")
+            }
+        }
+        val req = request("$api$base/git/blobs").post(body).build()
+        Http.client.newCall(req).execute().use { r ->
+            val text = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw ProviderException(r.code, "GitHub: couldn't upload ${file.name} (HTTP ${r.code})")
+            (Http.json.parseToJsonElement(text).jsonObject["sha"] as? JsonPrimitive)?.contentOrNull
+                ?: throw ProviderException(500, "GitHub: upload of ${file.name} failed")
+        }
     }
 
     data class Run(val id: Long, val status: String, val conclusion: String?, val url: String)

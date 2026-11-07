@@ -67,6 +67,8 @@ class BuildAgent(
 
     /** Files changed since the last commit (null value = delete). */
     private val pendingFiles = linkedMapOf<String, ByteArray?>()
+    /** Big uploaded files waiting to be committed straight from storage. */
+    private val pendingDisk = linkedMapOf<String, java.io.File>()
     private var depsChanged = false
 
     private val maxFixRounds: Int = when (req.effort) {
@@ -93,8 +95,12 @@ class BuildAgent(
                 pendingFiles[path] = bytes
                 if (ZipImport.isText(path) && bytes.size < 200_000) files[path] = bytes.toString(Charsets.UTF_8)
             }
+            pendingDisk.putAll(zip.bigFiles)
+            if (zip.tooBig.isNotEmpty()) {
+                step(BuildEvent.Kind.ERROR, "Skipped ${zip.tooBig.size} file(s) over 95 MB (GitHub's limit): ${zip.tooBig.take(3).joinToString { it.substringAfterLast('/') }}")
+            }
             pendingFiles[".github/workflows/${ProjectTemplate.IMPORT_WORKFLOW_FILE}"] = ProjectTemplate.importWorkflow.toByteArray()
-            step(BuildEvent.Kind.STEP, "Found ${zip.files.size} files in \"${zip.name}\"" + if (zip.skipped > 0) " (skipped ${zip.skipped} build/cache files)" else "")
+            step(BuildEvent.Kind.STEP, "Found ${zip.count} files in \"${zip.name}\"" + if (zip.skipped > 0) " (skipped ${zip.skipped} build/cache files)" else "")
             val repoName = zip.name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "project" }.take(40) +
                 "-" + SimpleDateFormat("yyMMdd-HHmm", Locale.US).format(Date())
             step(BuildEvent.Kind.STEP, "Creating GitHub repo $repoName")
@@ -132,17 +138,21 @@ class BuildAgent(
                     ProjectTemplate.files(appName, packageName, deps.toList()).getValue("app/build.gradle.kts").toByteArray()
                 depsChanged = false
             }
-            step(BuildEvent.Kind.STEP, "Uploading ${pendingFiles.size} changed file${if (pendingFiles.size == 1) "" else "s"} to GitHub")
+            val count = pendingFiles.size + pendingDisk.size
+            step(BuildEvent.Kind.STEP, "Uploading $count changed file${if (count == 1) "" else "s"} to GitHub")
             val message = when {
                 round > 0 -> "Fix build errors (round $round)"
                 existing != null -> "Change: ${req.description.take(60)}"
                 req.zipPath != null -> "Uploaded project from AI App"
                 else -> "Initial app from AI App"
             }
-            val sha = gh.commit(repo, pendingFiles.toMap(), message) { n ->
-                step(BuildEvent.Kind.STEP, "Uploaded $n of ${pendingFiles.size} files")
+            val total = pendingFiles.size + pendingDisk.size
+            val sha = gh.commit(repo, pendingFiles.toMap(), message, pendingDisk.toMap()) { n ->
+                step(BuildEvent.Kind.STEP, "Uploaded $n of $total files")
             }
             pendingFiles.clear()
+            pendingDisk.values.forEach { it.delete() }
+            pendingDisk.clear()
 
             step(BuildEvent.Kind.BUILD, "Building the APK on GitHub (usually 3–5 minutes)")
             val run = waitForRun(repo, sha)
