@@ -6,6 +6,7 @@ import com.aiapp.llm.Http
 import com.aiapp.llm.ProviderId
 import com.aiapp.llm.Providers
 import com.aiapp.llm.Role
+import com.aiapp.llm.WebTools
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -100,13 +101,38 @@ class BuildAgent(private val req: BuildRequest, private val progress: (String) -
         }
     }
 
+    /**
+     * Asks the model, letting it search the web or read pages (docs, library READMEs) before it
+     * writes files. Up to [MAX_WEB_STEPS] lookups per request.
+     */
     private suspend fun ask(prompt: String): String {
         val effort = if (req.effort == Effort.AUTO) Effort.HIGH else req.effort
-        val sb = StringBuilder()
-        Providers.get(req.provider)
-            .stream(req.apiKey, req.model, listOf(ChatMessage(Role.USER, prompt)), effort, ProjectTemplate.systemPrompt(packageName))
-            .collect { sb.append(it) }
-        return sb.toString()
+        val system = ProjectTemplate.systemPrompt(packageName) + ProjectTemplate.webInstructions
+        val cap = if (req.provider == ProviderId.OFFLINE) 3_000 else 8_000
+        val working = mutableListOf(ChatMessage(Role.USER, prompt))
+        var steps = 0
+        while (true) {
+            val sb = StringBuilder()
+            Providers.get(req.provider).stream(req.apiKey, req.model, working, effort, system).collect { sb.append(it) }
+            val reply = sb.toString()
+            if (steps >= MAX_WEB_STEPS || reply.contains("=== FILE:")) return reply
+            val search = WebTools.searchTag.find(reply)?.groupValues?.get(1)?.trim()
+            val fetch = WebTools.fetchTag.find(reply)?.groupValues?.get(1)?.trim()
+            val result = when {
+                search != null -> {
+                    progress("Searching the web: $search")
+                    "Web search results for \"$search\":\n\n" + WebTools.search(search).take(cap)
+                }
+                fetch != null -> {
+                    progress("Reading $fetch")
+                    "Content of $fetch:\n\n" + WebTools.fetch(fetch).take(cap)
+                }
+                else -> return reply
+            }
+            steps++
+            working += ChatMessage(Role.ASSISTANT, reply.trim())
+            working += ChatMessage(Role.USER, "[Tool result]\n$result\n\nNow continue: write the files in the required format.")
+        }
     }
 
     private fun firstPrompt() = """
@@ -277,6 +303,7 @@ class BuildAgent(private val req: BuildRequest, private val progress: (String) -
 
     companion object {
         private const val MAX_DOWNLOAD = 15L * 1024 * 1024
+        private const val MAX_WEB_STEPS = 3
         private val fileStart = Regex("^=+\\s*FILE:\\s*(.+?)\\s*=*\\s*$")
         private val fileEnd = Regex("^=+\\s*END FILE\\s*=*\\s*$")
         private val depLine = Regex("^=+\\s*DEPENDENCY:\\s*(.+?)\\s*=*\\s*$")

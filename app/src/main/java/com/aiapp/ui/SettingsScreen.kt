@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.aiapp.llm.OfflineCatalog
 import com.aiapp.llm.OfflineModel
 import com.aiapp.llm.ProviderId
 
@@ -128,7 +127,8 @@ private fun OfflineSection(vm: ChatViewModel) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OfflineCatalog.models.forEach { OfflineRow(it, vm) }
+        vm.offlineModels().forEach { OfflineRow(it, vm) }
+        AddOfflineModel(vm)
     }
 }
 
@@ -142,6 +142,7 @@ private fun OfflineRow(m: OfflineModel, vm: ChatViewModel) {
             when {
                 downloaded -> "Downloaded · ready offline"
                 progress != null -> "Downloading… ${(progress * 100).toInt()}%"
+                m.approxSizeGb == 0.0 -> "From huggingface.co/${m.repo}"
                 else -> "About ${m.approxSizeGb} GB · needs ${m.minRamGb} GB+ RAM"
             },
             style = MaterialTheme.typography.bodySmall,
@@ -157,7 +158,10 @@ private fun OfflineRow(m: OfflineModel, vm: ChatViewModel) {
                     OutlinedButton(onClick = { vm.deleteOffline(m) }) { Text("Delete") }
                 }
                 progress != null -> OutlinedButton(onClick = { vm.cancelDownload(m) }) { Text("Pause") }
-                else -> Button(onClick = { vm.downloadOffline(m) }) { Text("Download") }
+                else -> {
+                    Button(onClick = { vm.downloadOffline(m) }) { Text("Download") }
+                    if (m.id.startsWith("hf-")) OutlinedButton(onClick = { vm.deleteOffline(m) }) { Text("Remove") }
+                }
             }
         }
         vm.downloadErrors[m.id]?.let {
@@ -198,6 +202,61 @@ private fun GithubTokenField(vm: ChatViewModel) {
                 note = "Cleared"
             }) { Text("Clear") }
             note?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+        }
+    }
+}
+
+@Composable
+private fun AddOfflineModel(vm: ChatViewModel) {
+    var link by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var token by remember { mutableStateOf(vm.hfToken()) }
+    var tokenNote by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Add a model", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Paste a Hugging Face link to any LiteRT-LM model (.litertlm), for example from huggingface.co/litert-community.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = link,
+            onValueChange = {
+                link = it
+                error = null
+            },
+            label = { Text("Hugging Face link") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(onClick = {
+            error = vm.addOfflineModel(link)
+            if (error == null) link = ""
+        }, enabled = link.isNotBlank()) { Text("Add and download") }
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+
+        OutlinedTextField(
+            value = token,
+            onValueChange = {
+                token = it
+                tokenNote = null
+            },
+            label = { Text("Hugging Face token (optional)") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "Only needed for models that ask you to accept a licence. Create one at huggingface.co/settings/tokens.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = {
+                vm.saveHfToken(token)
+                tokenNote = "Saved"
+            }) { Text("Save token") }
+            tokenNote?.let { Text("  $it", style = MaterialTheme.typography.labelMedium) }
         }
     }
 }

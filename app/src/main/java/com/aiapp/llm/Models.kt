@@ -2,6 +2,7 @@ package com.aiapp.llm
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.Serializable
 
 enum class ProviderId(val label: String, val needsKey: Boolean = true) {
     CLAUDE("Claude"),
@@ -20,9 +21,30 @@ enum class Effort(val label: String) {
     MAX("Max"),
 }
 
+@Serializable
 enum class Role { USER, ASSISTANT }
 
-data class ChatMessage(val role: Role, val text: String)
+/**
+ * A file attached to a message. [path] points into the app's private storage. [text] holds the
+ * extracted text for text-like files (txt, csv, code, json…), so every model can read them.
+ */
+@Serializable
+data class Attachment(
+    val name: String,
+    val mime: String,
+    val path: String,
+    val text: String? = null,
+) {
+    val isImage get() = mime.startsWith("image/")
+    val isPdf get() = mime == "application/pdf"
+}
+
+@Serializable
+data class ChatMessage(
+    val role: Role,
+    val text: String,
+    val attachments: List<Attachment> = emptyList(),
+)
 
 data class ModelInfo(val id: String, val name: String)
 

@@ -60,6 +60,17 @@ object ProjectTemplate {
                     versionCode = 1
                     versionName = "1.0"
                 }
+                signingConfigs {
+                    // Created once by the workflow and kept in the repo, so every build installs over the last one.
+                    getByName("debug") {
+                        if (file("signing.keystore").exists()) {
+                            storeFile = file("signing.keystore")
+                            storePassword = "android"
+                            keyAlias = "app"
+                            keyPassword = "android"
+                        }
+                    }
+                }
                 buildTypes { release { isMinifyEnabled = false } }
                 compileOptions {
                     sourceCompatibility = JavaVersion.VERSION_17
@@ -114,8 +125,20 @@ object ProjectTemplate {
                   - uses: gradle/actions/setup-gradle@v4
                     with:
                       gradle-version: "8.14.3"
+                  - name: Signing key (created once, then reused)
+                    run: |
+                      if [ ! -f app/signing.keystore ]; then
+                        keytool -genkeypair -keystore app/signing.keystore -storepass android -keypass android -alias app -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AI App"
+                        git config user.name "AI App"
+                        git config user.email "ai-app@users.noreply.github.com"
+                        git add app/signing.keystore
+                        git commit -m "Add signing key"
+                        git push origin HEAD:${'$'}{{ github.ref_name }} || echo "Couldn't save the key; this build still works."
+                      fi
                   - name: Build debug APK
-                    run: gradle assembleDebug --stacktrace
+                    run: |
+                      set -o pipefail
+                      gradle assembleDebug --stacktrace 2>&1 | tee build.log
                   - name: Rename APK
                     run: cp app/build/outputs/apk/debug/app-debug.apk app-${'$'}{{ github.run_number }}.apk
                   - uses: softprops/action-gh-release@v2
@@ -145,6 +168,14 @@ object ProjectTemplate {
                 </activity>
             </application>
         </manifest>
+    """.trimIndent()
+
+    /** Lets the model look things up before writing code. */
+    val webInstructions = "\n\n" + """
+
+        Before writing files you may look things up online. Reply with ONLY <search>query</search> to
+        search the web, or ONLY <fetch>https://url</fetch> to read a page (docs, READMEs, release
+        notes). Use this when you're unsure how a library or API works. Then write the files.
     """.trimIndent()
 
     /** Rules given to the model. Kept short so small offline models can follow them. */

@@ -1,5 +1,7 @@
 package com.aiapp.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +46,8 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
     var allowOther by rememberSaveable { mutableStateOf(false) }
     var problem by rememberSaveable { mutableStateOf<String?>(null) }
     val uri = LocalUriHandler.current
+    // Ask once for permission to show the "build finished" notification (Android 13+).
+    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     Scaffold(
         topBar = {
@@ -68,6 +72,11 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
             val modelName = chat.models.firstOrNull { it.id == chat.model }?.name ?: chat.model.ifBlank { "no model picked" }
             Text(
                 "Using ${chat.provider.label} · $modelName · Brain ${chat.effort.label}. Change these on the chat screen.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Builds keep running if you leave or close the app. You'll get a notification when the APK is ready.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -120,6 +129,9 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
                         else -> null
                     }
                     if (problem == null) {
+                        if (android.os.Build.VERSION.SDK_INT >= 33) {
+                            notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
                         vm.start(
                             BuildRequest(
                                 description = description.trim(),

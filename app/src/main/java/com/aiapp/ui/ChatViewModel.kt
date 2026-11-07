@@ -18,6 +18,7 @@ import com.aiapp.llm.ProviderException
 import com.aiapp.llm.ProviderId
 import com.aiapp.llm.Providers
 import com.aiapp.llm.Role
+import com.aiapp.llm.WebTools
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -29,6 +30,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         Providers.init(app)
+        WebTools.downloader = { url -> com.aiapp.data.Downloads.save(app, url) }
+        Providers.offline.hfToken = keys.getExtra("HF")
     }
     private val prefs = app.getSharedPreferences("chat_prefs", Context.MODE_PRIVATE)
 
@@ -57,6 +60,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         enumValueOrDefault(prefs.getString("effort", null), Effort.AUTO),
     )
         private set
+
+    /** Lets the model search the web and read pages (works for offline models too). */
+    var webEnabled by mutableStateOf(prefs.getBoolean("web", true))
+        private set
+
+    fun toggleWeb() {
+        webEnabled = !webEnabled
+        prefs.edit().putBoolean("web", webEnabled).apply()
+    }
 
     private var job: Job? = null
 
@@ -105,6 +117,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteOffline(m: OfflineModel) {
         viewModelScope.launch {
             Providers.offline.delete(m)
+            if (m.id.startsWith("hf-")) Providers.offline.removeCustom(m)
             offlineVersion++
             if (provider == ProviderId.OFFLINE) refreshModels()
         }
@@ -123,6 +136,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun key(p: ProviderId): String = keys.get(p)
 
     fun githubToken(): String = keys.getExtra("GITHUB")
+
+    fun hfToken(): String = keys.getExtra("HF")
+
+    fun saveHfToken(value: String) {
+        keys.setExtra("HF", value)
+        Providers.offline.hfToken = value.trim()
+    }
+
+    /** Built-in and user-added offline models. */
+    fun offlineModels(): List<OfflineModel> {
+        offlineVersion // recompose when the list changes
+        return Providers.offline.allModels()
+    }
+
+    /** Adds an offline model from a Hugging Face link. Returns an error message, or null on success. */
+    fun addOfflineModel(link: String): String? {
+        val m = Providers.offline.addCustom(link) ?: return "Paste a Hugging Face link like huggingface.co/litert-community/Gemma3-1B-IT"
+        offlineVersion++
+        if (provider == ProviderId.OFFLINE) refreshModels()
+        downloadOffline(m)
+        return null
+    }
 
     fun saveGithubToken(value: String) = keys.setExtra("GITHUB", value)
 
@@ -198,11 +233,48 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         streaming = true
         streamingText = ""
         status = if (p == ProviderId.OFFLINE) "Loading offline model…" else "Thinking…"
+        val web = webEnabled
+        val system = if (web) SYSTEM_PROMPT + WebTools.instructions(today()) else SYSTEM_PROMPT
         job = viewModelScope.launch {
             try {
-                Providers.get(p).stream(k, m, history, e, SYSTEM_PROMPT).collect { delta ->
-                    if (status != "Writing…") status = "Writing…"
-                    streamingText += delta
+                val working = history.toMutableList()
+                // Small offline models have short memory, so give them shorter web results.
+                val cap = if (p == ProviderId.OFFLINE) 3_000 else 8_000
+                var steps = 0
+                while (true) {
+                    streamingText = ""
+                    Providers.get(p).stream(k, m, working, e, system).collect { delta ->
+                        if (status != "Writing…") status = "Writing…"
+                        streamingText += delta
+                    }
+                    if (!web || steps >= MAX_WEB_STEPS) break
+                    // (Offline models get the same number of lookups; they're cheap.)
+                    val reply = streamingText
+                    val search = WebTools.searchTag.find(reply)?.groupValues?.get(1)?.trim()
+                    val fetch = WebTools.fetchTag.find(reply)?.groupValues?.get(1)?.trim()
+                    val download = WebTools.downloadTag.find(reply)?.groupValues?.get(1)?.trim()
+                    val result = when {
+                        download != null -> {
+                            status = "Downloading ${download.substringAfterLast('/').take(40)}…"
+                            WebTools.download(download)
+                        }
+                        search != null -> {
+                            status = "Searching the web: $search"
+                            "Web search results for \"$search\":\n\n" + WebTools.search(search).take(cap)
+                        }
+                        fetch != null -> {
+                            status = "Reading ${fetch.removePrefix("https://").removePrefix("http://").substringBefore('/')}…"
+                            "Content of $fetch:\n\n" + WebTools.fetch(fetch).take(cap)
+                        }
+                        else -> break
+                    }
+                    steps++
+                    working += ChatMessage(Role.ASSISTANT, reply.trim())
+                    working += ChatMessage(
+                        Role.USER,
+                        "[Tool result — not from the user]\n$result\n\nNow answer the user's question, or search/fetch again if you need more.",
+                    )
+                    streamingText = ""
                 }
             } catch (ce: CancellationException) {
                 throw ce
@@ -226,7 +298,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun finishStream() {
-        if (streamingText.isNotBlank()) messages += ChatMessage(Role.ASSISTANT, streamingText)
+        val stripped = streamingText.replace(WebTools.searchTag, "").replace(WebTools.fetchTag, "")
+            .replace(WebTools.downloadTag, "").trim()
+        if (stripped.isNotBlank()) messages += ChatMessage(Role.ASSISTANT, stripped)
         streamingText = ""
         status = null
         streaming = false
@@ -242,7 +316,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         else -> t.message ?: "Something went wrong."
     }
 
+    private fun today(): String =
+        java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.US).format(java.util.Date())
+
     private companion object {
+        const val MAX_WEB_STEPS = 6
+
         const val SYSTEM_PROMPT =
             "You are a helpful assistant in a mobile app. Answer clearly and concisely. " +
                 "Use Markdown for code blocks and lists."

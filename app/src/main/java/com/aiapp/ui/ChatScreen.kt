@@ -151,6 +151,10 @@ private fun PickerRow(vm: ChatViewModel) {
             onSelect = { vm.selectModel(it.id) },
             onOpen = { if (vm.models.isEmpty()) vm.refreshModels() },
         )
+        AssistChip(
+            onClick = vm::toggleWeb,
+            label = { Text(if (vm.webEnabled) "Web: On" else "Web: Off") },
+        )
         Dropdown(
             label = "Effort: ${vm.effort.label}",
             options = Effort.entries.toList(),

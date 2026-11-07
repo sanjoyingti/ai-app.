@@ -36,7 +36,8 @@ data class OfflineModel(
 )
 
 object OfflineCatalog {
-    val models = listOf(
+    /** Built-in picks; users can add more from any Hugging Face repo with a .litertlm file. */
+    val builtIn = listOf(
         OfflineModel(
             id = "gemma-4-e4b",
             name = "Gemma 4 E4B (best offline)",
@@ -51,9 +52,32 @@ object OfflineCatalog {
             approxSizeGb = 2.6,
             minRamGb = 4,
         ),
+        OfflineModel(
+            id = "gemma-3-1b",
+            name = "Gemma 3 1B (fastest, any phone)",
+            repo = "litert-community/Gemma3-1B-IT",
+            approxSizeGb = 1.0,
+            minRamGb = 3,
+        ),
     )
 
-    fun byId(id: String): OfflineModel? = models.firstOrNull { it.id == id }
+    /** "https://huggingface.co/owner/repo/…" or "owner/repo" → "owner/repo". */
+    fun parseRepo(input: String): String? {
+        val s = input.trim().removePrefix("https://").removePrefix("http://").removePrefix("huggingface.co/")
+            .removePrefix("hf.co/").trim('/')
+        val parts = s.split('/')
+        if (parts.size < 2 || parts[0].isBlank() || parts[1].isBlank()) return null
+        val ok = Regex("^[A-Za-z0-9._-]+$")
+        return if (ok.matches(parts[0]) && ok.matches(parts[1])) "${parts[0]}/${parts[1]}" else null
+    }
+
+    fun custom(repo: String) = OfflineModel(
+        id = "hf-" + repo.lowercase().replace(Regex("[^a-z0-9]+"), "-"),
+        name = repo.substringAfter('/') + " (added)",
+        repo = repo,
+        approxSizeGb = 0.0,
+        minRamGb = 0,
+    )
 }
 
 /**
@@ -65,6 +89,34 @@ class OfflineProvider(context: Context) : LlmProvider {
 
     private val appContext = context.applicationContext
     private val dir = File(appContext.filesDir, "models").apply { mkdirs() }
+    private val prefs = appContext.getSharedPreferences("offline_models", Context.MODE_PRIVATE)
+
+    /** Optional Hugging Face token, for models that need you to accept a licence first. */
+    var hfToken: String = ""
+
+    /** Repos the user added, in the order they were added. */
+    fun customRepos(): List<String> = prefs.getString("custom", "").orEmpty().split('\n').filter { it.isNotBlank() }
+
+    fun allModels(): List<OfflineModel> = OfflineCatalog.builtIn + customRepos().map { OfflineCatalog.custom(it) }
+
+    fun byId(id: String): OfflineModel? = allModels().firstOrNull { it.id == id }
+
+    /** Adds a model from a Hugging Face link; returns it, or null if the link isn't valid. */
+    fun addCustom(link: String): OfflineModel? {
+        val repo = OfflineCatalog.parseRepo(link) ?: return null
+        val list = customRepos()
+        if (repo !in list && OfflineCatalog.builtIn.none { it.repo.equals(repo, true) }) {
+            prefs.edit().putString("custom", (list + repo).joinToString("\n")).apply()
+        }
+        return OfflineCatalog.custom(repo)
+    }
+
+    fun removeCustom(model: OfflineModel) {
+        prefs.edit().putString("custom", customRepos().filter { it != model.repo }.joinToString("\n")).apply()
+    }
+
+    private fun hfHeaders(): Map<String, String> =
+        if (hfToken.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $hfToken")
 
     private val engineLock = Mutex()
     private var engine: Engine? = null
@@ -84,18 +136,26 @@ class OfflineProvider(context: Context) : LlmProvider {
 
     fun recommended(): OfflineModel {
         val ram = deviceRamGb()
-        return OfflineCatalog.models.firstOrNull { ram >= it.minRamGb } ?: OfflineCatalog.models.last()
+        return OfflineCatalog.builtIn.firstOrNull { ram >= it.minRamGb } ?: OfflineCatalog.builtIn.last()
     }
 
     override suspend fun listModels(apiKey: String): List<ModelInfo> =
-        OfflineCatalog.models.map { m ->
+        allModels().map { m ->
             val suffix = if (isDownloaded(m)) "" else " · download in Settings"
             ModelInfo(m.id, m.name + suffix)
         }
 
     /** Finds the .litertlm file name in the Hugging Face repo, so a renamed file doesn't break downloads. */
     private suspend fun remoteFileName(model: OfflineModel): String {
-        val info = Http.getJson("https://huggingface.co/api/models/${model.repo}", emptyMap())
+        val info = try {
+            Http.getJson("https://huggingface.co/api/models/${model.repo}", hfHeaders())
+        } catch (e: ProviderException) {
+            if (e.code == 401 || e.code == 403) {
+                throw ProviderException(e.code, "This model needs a Hugging Face token: accept its licence on huggingface.co, then add your token in Settings.")
+            }
+            if (e.code == 404) throw ProviderException(404, "Model ${model.repo} not found on Hugging Face.")
+            throw e
+        }
         val names = (info["siblings"] as? JsonArray).orEmpty().mapNotNull {
             ((it as? JsonObject)?.get("rfilename") as? JsonPrimitive)?.contentOrNull
         }.filter { it.endsWith(".litertlm") }
@@ -103,7 +163,7 @@ class OfflineProvider(context: Context) : LlmProvider {
         val chipTags = listOf("web", "qualcomm", "mediatek", "sm8", "mt6", "npu", "ios", "tpu")
         return names.firstOrNull { n -> chipTags.none { n.lowercase().contains(it) } }
             ?: names.firstOrNull()
-            ?: throw IOException("No model file found in ${model.repo}")
+            ?: throw IOException("${model.repo} has no .litertlm file. Only LiteRT-LM models work offline (search Hugging Face for \"litert-lm\").")
     }
 
     /**
@@ -119,9 +179,13 @@ class OfflineProvider(context: Context) : LlmProvider {
         val already = if (part.exists()) part.length() else 0L
 
         val request = Request.Builder().url(url)
+            .apply { hfHeaders().forEach { (k, v) -> header(k, v) } }
             .apply { if (already > 0) header("Range", "bytes=$already-") }
             .build()
         Http.client.newCall(request).execute().use { resp ->
+            if (resp.code == 401 || resp.code == 403) {
+                throw ProviderException(resp.code, "This model needs a Hugging Face token: accept its licence on huggingface.co, then add your token in Settings.")
+            }
             if (!resp.isSuccessful) throw ProviderException(resp.code, "Download failed (HTTP ${resp.code}).")
             val body = resp.body ?: throw IOException("Empty download.")
             val resumed = resp.code == 206
@@ -187,9 +251,9 @@ class OfflineProvider(context: Context) : LlmProvider {
         effort: Effort,
         system: String,
     ): Flow<String> = flow {
-        val m = OfflineCatalog.byId(model) ?: throw ProviderException(400, "Unknown offline model.")
+        val m = byId(model) ?: throw ProviderException(400, "Unknown offline model.")
         if (!isDownloaded(m)) {
-            throw ProviderException(404, "Download ${m.name} in Settings first (about ${m.approxSizeGb} GB).")
+            throw ProviderException(404, "Download ${m.name} in Settings → Offline models first.")
         }
         val last = messages.lastOrNull { it.role == Role.USER } ?: return@flow
         val history = messages.dropLast(1).map {
