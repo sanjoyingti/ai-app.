@@ -9,10 +9,29 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.UUID
+
+/** A saved Build Mode project: the app, its whole agent conversation, and when it was last used. */
+@Serializable
+data class SavedProject(
+    val id: String,
+    val updated: Long = System.currentTimeMillis(),
+    val project: Project? = null,
+    val timeline: List<TimelineItem> = emptyList(),
+) {
+    val title: String get() = project?.appName
+        ?: (timeline.firstOrNull { it is TimelineItem.User } as? TimelineItem.User)?.text?.take(50)
+        ?: "Untitled"
+    val lastResult: TimelineItem.Result? get() = timeline.lastOrNull { it is TimelineItem.Result } as? TimelineItem.Result
+}
+
+/** The single-project save format used before projects history. */
+@Serializable
+private data class OldSaved(val project: Project? = null, val timeline: List<TimelineItem> = emptyList())
 
 /**
- * Shared Build Mode state: the agent timeline and the current project. The screen and the
- * background service both use it, and it's saved so it's still there after the app restarts.
+ * Shared Build Mode state: the open project's agent timeline. Every project is saved, so you can
+ * come back to any of them later and keep asking for changes (like chats).
  */
 object BuildRunner {
     val timeline = mutableStateListOf<TimelineItem>()
@@ -20,6 +39,8 @@ object BuildRunner {
         internal set
     var project by mutableStateOf<Project?>(null)
         internal set
+    var projectId by mutableStateOf(UUID.randomUUID().toString())
+        private set
 
     /** The request the service should run next. */
     @Volatile
@@ -28,29 +49,68 @@ object BuildRunner {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private var loaded = false
 
-    @Serializable
-    private data class Saved(val project: Project? = null, val timeline: List<TimelineItem> = emptyList())
-
-    private fun file(context: Context) = File(context.filesDir, "build_mode.json")
+    private fun dir(context: Context) = File(context.filesDir, "build_projects").apply { mkdirs() }
+    private fun prefs(context: Context) = context.getSharedPreferences("build_mode", Context.MODE_PRIVATE)
 
     fun load(context: Context) {
         if (loaded) return
         loaded = true
-        val saved = runCatching { json.decodeFromString<Saved>(file(context).readText()) }.getOrNull() ?: return
-        project = saved.project
-        timeline.clear()
-        timeline.addAll(saved.timeline)
+        // One-time move from the single-project file used before.
+        val old = File(context.filesDir, "build_mode.json")
+        if (old.exists()) {
+            runCatching {
+                val o = json.decodeFromString<OldSaved>(old.readText())
+                if (o.timeline.isNotEmpty()) {
+                    val id = UUID.randomUUID().toString()
+                    File(dir(context), "$id.json").writeText(json.encodeToString(SavedProject(id, old.lastModified(), o.project, o.timeline)))
+                    prefs(context).edit().putString("current", id).apply()
+                }
+            }
+            old.delete()
+        }
+        prefs(context).getString("current", null)?.let { open(context, it) }
     }
 
     fun save(context: Context) {
-        runCatching { file(context).writeText(json.encodeToString(Saved(project, timeline.toList()))) }
+        if (timeline.isEmpty() && project == null) return
+        runCatching {
+            File(dir(context), "$projectId.json")
+                .writeText(json.encodeToString(SavedProject(projectId, System.currentTimeMillis(), project, timeline.toList())))
+            prefs(context).edit().putString("current", projectId).apply()
+        }
     }
 
-    /** Forget the current project and start fresh (the GitHub repo stays on your account). */
+    /** All saved projects, most recently used first. */
+    fun list(context: Context): List<SavedProject> = dir(context).listFiles { f -> f.name.endsWith(".json") }.orEmpty()
+        .mapNotNull { f -> runCatching { json.decodeFromString<SavedProject>(f.readText()) }.getOrNull() }
+        .sortedByDescending { it.updated }
+
+    /** Opens a saved project to keep working on it. */
+    fun open(context: Context, id: String): Boolean {
+        if (running) return false
+        val saved = runCatching { json.decodeFromString<SavedProject>(File(dir(context), "$id.json").readText()) }.getOrNull()
+            ?: return false
+        projectId = saved.id
+        project = saved.project
+        timeline.clear()
+        timeline.addAll(saved.timeline)
+        prefs(context).edit().putString("current", id).apply()
+        return true
+    }
+
+    fun delete(context: Context, id: String) {
+        if (running && id == projectId) return
+        File(dir(context), "$id.json").delete()
+        if (id == projectId) newProject(context)
+    }
+
+    /** Starts a fresh project; the current one stays saved in Projects (and its repo stays on GitHub). */
     fun newProject(context: Context) {
         if (running) return
+        save(context)
+        projectId = UUID.randomUUID().toString()
         project = null
         timeline.clear()
-        save(context)
+        prefs(context).edit().remove("current").apply()
     }
 }

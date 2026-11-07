@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import com.aiapp.llm.MediaItem
+import com.aiapp.llm.MediaSearch
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -79,6 +82,12 @@ private fun Prose(text: String) {
             val t = line.trimStart()
             when {
                 t.isEmpty() -> Spacer(Modifier.height(4.dp))
+                Regex("^!\\[[^\\]]*]\\((https?://[^)\\s]+)\\)$").matches(t) -> {
+                    val url = Regex("\\((https?://[^)\\s]+)\\)").find(t)!!.groupValues[1]
+                    NetImage(url, contentScale = androidx.compose.ui.layout.ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp))
+                }
+                MediaSearch.youtubeId(t.trim('<', '>')) != null && t.startsWith("http") && !t.contains(' ') ->
+                    VideoCard(MediaItem(true, t, "https://i.ytimg.com/vi/${MediaSearch.youtubeId(t)}/hqdefault.jpg", "Video", "YouTube"))
                 t.startsWith("### ") -> Text(styled(t.removePrefix("### ")), style = MaterialTheme.typography.titleSmall)
                 t.startsWith("## ") -> Text(styled(t.removePrefix("## ")), style = MaterialTheme.typography.titleMedium)
                 t.startsWith("# ") -> Text(styled(t.removePrefix("# ")), style = MaterialTheme.typography.titleLarge)

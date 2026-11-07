@@ -20,6 +20,8 @@ object WebTools {
 
     val searchTag = Regex("<search>([\\s\\S]{1,300}?)</search>", RegexOption.IGNORE_CASE)
     val fetchTag = Regex("<fetch>\\s*(https?://\\S{1,500}?)\\s*</fetch>", RegexOption.IGNORE_CASE)
+    val imagesTag = Regex("<images>([\\s\\S]{1,200}?)</images>", RegexOption.IGNORE_CASE)
+    val videosTag = Regex("<videos>([\\s\\S]{1,200}?)</videos>", RegexOption.IGNORE_CASE)
     val downloadTag = Regex("<download>\\s*(https?://\\S{1,500}?)\\s*</download>", RegexOption.IGNORE_CASE)
 
     /** Saves downloads to Downloads/AIApp. Set once at startup. */
@@ -32,6 +34,11 @@ object WebTools {
         <search>your search query</search>
         To read a web page, reply with ONLY:
         <fetch>https://full.url</fetch>
+        To show the user pictures (people, places, things), reply with ONLY:
+        <images>what to find</images>
+        To show the user videos (clips, songs, trailers, how-tos), reply with ONLY:
+        <videos>what to find</videos>
+        The pictures or videos appear in the chat automatically; afterwards just write a short caption.
         To save a file (PDF, image, APK, document) to the user's phone when they ask for it, reply with ONLY:
         <download>https://direct.file.url</download>
         You will get the results and can then search again, read a page, or answer. Search when the

@@ -71,6 +71,8 @@ import kotlinx.coroutines.launch
 import com.aiapp.builder.BuildEvent
 import com.aiapp.builder.BuildRequest
 import com.aiapp.builder.TimelineItem
+import com.aiapp.builder.BuildRunner
+import androidx.compose.runtime.remember
 import com.aiapp.llm.ProviderId
 
 /** Build Mode, laid out like an IDE agent chat: your requests, live steps, files and results. */
@@ -78,11 +80,17 @@ import com.aiapp.llm.ProviderId
 @Composable
 fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onOpenSettings: () -> Unit) {
     var showFiles by rememberSaveable { mutableStateOf(false) }
+    var showProjects by rememberSaveable { mutableStateOf(false) }
     var openFile by rememberSaveable { mutableStateOf<String?>(null) }
     val project = vm.project
 
-    BackHandler(enabled = showFiles || openFile != null) {
-        if (openFile != null) openFile = null else showFiles = false
+    BackHandler(enabled = showFiles || openFile != null || showProjects) {
+        if (openFile != null) openFile = null else if (showFiles) showFiles = false else showProjects = false
+    }
+
+    if (showProjects) {
+        ProjectList(vm, onBack = { showProjects = false })
+        return
     }
 
     openFile?.let { path ->
@@ -116,8 +124,11 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    TextButton(onClick = { showProjects = true }) { Text("Projects") }
                     if (project != null) {
-                        TextButton(onClick = { showFiles = true }) { Text("Files (${project.files.size})") }
+                        TextButton(onClick = { showFiles = true }) { Text("Files") }
+                    }
+                    if (vm.timeline.isNotEmpty()) {
                         TextButton(onClick = vm::newProject, enabled = !vm.running) { Text("New") }
                     }
                 },
@@ -452,6 +463,68 @@ private fun CodeViewer(path: String, content: String, onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
+    var version by remember { mutableStateOf(0) }
+    val projects = remember(version) { vm.projects() }
+    val fmt = remember { java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.getDefault()) }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Projects") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                actions = {
+                    TextButton(onClick = {
+                        vm.newProject()
+                        onBack()
+                    }, enabled = !vm.running) { Text("New project") }
+                },
+            )
+        },
+    ) { padding ->
+        if (projects.isEmpty()) {
+            Text("No projects yet. Describe an app or upload a .zip to start one.", modifier = Modifier.padding(padding).padding(24.dp))
+        }
+        LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+            itemsIndexed(projects) { _, p ->
+                val current = p.id == BuildRunner.projectId
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !vm.running || current) {
+                            if (vm.openProject(p.id) || current) onBack()
+                        }
+                        .padding(start = 16.dp, top = 10.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.title + if (current) "  (open)" else "", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        val status = when {
+                            current && vm.running -> "Building now…"
+                            p.lastResult?.success == true -> "APK ready"
+                            p.lastResult != null -> "Last build failed"
+                            else -> "In progress"
+                        }
+                        Text(
+                            "${fmt.format(java.util.Date(p.updated))} · $status" + (if (p.project?.imported == true) " · uploaded" else ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (!(current && vm.running)) {
+                        TextButton(onClick = {
+                            vm.deleteProject(p.id)
+                            version++
+                        }) { Text("Delete") }
+                    }
+                }
+                HorizontalDivider()
             }
         }
     }

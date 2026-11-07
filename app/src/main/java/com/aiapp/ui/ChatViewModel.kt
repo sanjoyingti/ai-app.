@@ -473,6 +473,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         job = viewModelScope.launch {
             try {
                 val working = history.toMutableList()
+                foundMedia.clear()
                 // Small offline models have short memory, so give them shorter web results.
                 val cap = if (p == ProviderId.OFFLINE) 3_000 else 8_000
                 var steps = 0
@@ -488,7 +489,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     val search = WebTools.searchTag.find(reply)?.groupValues?.get(1)?.trim()
                     val fetch = WebTools.fetchTag.find(reply)?.groupValues?.get(1)?.trim()
                     val download = WebTools.downloadTag.find(reply)?.groupValues?.get(1)?.trim()
+                    val images = WebTools.imagesTag.find(reply)?.groupValues?.get(1)?.trim()
+                    val videos = WebTools.videosTag.find(reply)?.groupValues?.get(1)?.trim()
                     val result = when {
+                        images != null -> {
+                            status = "Finding pictures: $images"
+                            val found = com.aiapp.llm.MediaSearch.images(images)
+                            foundMedia += found
+                            if (found.isEmpty()) "No pictures found for \"$images\"."
+                            else "Showing the user ${found.size} pictures of \"$images\" (from: " +
+                                found.take(4).joinToString { it.title.take(60) } + "). Write one short caption."
+                        }
+                        videos != null -> {
+                            status = "Finding videos: $videos"
+                            val found = com.aiapp.llm.MediaSearch.videos(videos)
+                            foundMedia += found
+                            if (found.isEmpty()) "No videos found for \"$videos\"."
+                            else "Showing the user these videos:\n" + found.joinToString("\n") { "- ${it.title}" } +
+                                "\nWrite one short caption."
+                        }
                         download != null -> {
                             status = "Downloading ${download.substringAfterLast('/').take(40)}…"
                             WebTools.download(download)
@@ -534,10 +553,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("current_chat", conversationId).apply()
     }
 
+    /** Pictures and videos found while answering; shown under the reply. */
+    private val foundMedia = mutableListOf<com.aiapp.llm.MediaItem>()
+
     private fun finishStream() {
         val stripped = streamingText.replace(WebTools.searchTag, "").replace(WebTools.fetchTag, "")
-            .replace(WebTools.downloadTag, "").trim()
-        if (stripped.isNotBlank()) messages += ChatMessage(Role.ASSISTANT, stripped)
+            .replace(WebTools.downloadTag, "").replace(WebTools.imagesTag, "").replace(WebTools.videosTag, "").trim()
+        if (stripped.isNotBlank() || foundMedia.isNotEmpty()) {
+            messages += ChatMessage(Role.ASSISTANT, stripped, media = foundMedia.toList())
+        }
+        foundMedia.clear()
         persist()
         streamingText = ""
         status = null

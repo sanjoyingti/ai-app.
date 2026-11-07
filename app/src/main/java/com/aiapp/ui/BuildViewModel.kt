@@ -23,4 +23,10 @@ class BuildViewModel(private val app: Application) : AndroidViewModel(app) {
     fun stop() = BuildService.stop(app)
 
     fun newProject() = BuildRunner.newProject(app)
+
+    fun projects() = BuildRunner.list(app)
+
+    fun openProject(id: String) = BuildRunner.open(app, id)
+
+    fun deleteProject(id: String) = BuildRunner.delete(app, id)
 }

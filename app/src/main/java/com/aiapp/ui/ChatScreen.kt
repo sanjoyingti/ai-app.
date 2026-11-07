@@ -106,7 +106,7 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
     LaunchedEffect(vm.streamingText, voiceMode) {
         if (!voiceMode || !vm.streaming) return@LaunchedEffect
         val live = vm.streamingText
-        if (live.contains("<search", true) || live.contains("<fetch", true) || live.contains("<download", true)) {
+        if (listOf("<search", "<fetch", "<download", "<images", "<videos").any { live.contains(it, true) }) {
             if (!saidWait) {
                 saidWait = true
                 voice.enqueue("One moment, let me check.")
@@ -371,8 +371,13 @@ private fun MessageBubble(message: ChatMessage, onBuildZip: (com.aiapp.llm.Attac
             }
         }
     } else {
-        SelectionContainer {
-            MarkdownText(message.text, modifier = Modifier.fillMaxWidth())
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (message.media.isNotEmpty()) MediaRow(message.media)
+            if (message.text.isNotBlank()) {
+                SelectionContainer {
+                    MarkdownText(message.text, modifier = Modifier.fillMaxWidth())
+                }
+            }
         }
     }
 }

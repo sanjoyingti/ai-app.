@@ -40,11 +40,22 @@ data class Attachment(
     val isZip get() = mime == "application/zip"
 }
 
+/** An image or video found on the web, shown under a reply. */
+@Serializable
+data class MediaItem(
+    val video: Boolean,
+    val url: String,
+    val thumb: String,
+    val title: String = "",
+    val source: String = "",
+)
+
 @Serializable
 data class ChatMessage(
     val role: Role,
     val text: String,
     val attachments: List<Attachment> = emptyList(),
+    val media: List<MediaItem> = emptyList(),
 )
 
 data class ModelInfo(val id: String, val name: String)

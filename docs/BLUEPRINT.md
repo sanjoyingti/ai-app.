@@ -21,7 +21,7 @@ Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
 
-## Status (v0.9, 7 Nov 2026)
+## Status (v0.10, 7 Nov 2026)
 
 Built and shipping from GitHub Releases (`releases/latest`):
 
@@ -30,7 +30,8 @@ Built and shipping from GitHub Releases (`releases/latest`):
 | Chat | Claude, Gemini, ChatGPT, Open models (OpenRouter), Offline; most-advanced-first picker; Low–Max effort; streaming; Stop | `llm/` |
 | Web access | Every model, offline included, can search (DuckDuckGo, Wikipedia fallback), read pages and save files to Downloads/AIApp; up to 6 lookups per answer; Web chip on by default | `llm/WebTools.kt`, `data/Downloads.kt` |
 | Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
-| History | Chats saved on the phone; Chats screen; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `ui/Markdown.kt` |
+| History | Chats saved on the phone (Chats screen); every Build Mode project saved with its full agent timeline (Projects screen) so you can resume it later; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `builder/BuildRunner.kt`, `ui/Markdown.kt` |
+| Images and videos in chat | Ask for pictures or videos: models use `<images>`/`<videos>` tools (DuckDuckGo Images with Wikimedia fallback; YouTube search), results show under the reply; tap an image for full screen, play videos inline; Markdown images and YouTube links render too | `llm/MediaSearch.kt`, `ui/MediaViews.kt` |
 | Attachments | Photos and PDFs sent natively to Claude, Gemini, ChatGPT and OpenRouter; text/CSV/code files to every model; big files trimmed to the most relevant parts; photos shrunk to 1600 px | `llm/AttachmentContent.kt`, `data/AttachmentStore.kt` |
 | Voice | Full-screen live conversation with an animated orb; speaks each sentence as it's written; fast model + light thinking by default; never gets stuck (empty replies and errors go back to listening); on-device recognition with online fallback; tap the orb to interrupt; voice, pitch and speed | `ui/Voice.kt`, `ui/VoiceScreen.kt` |
 | Compile a project | Upload an Android Studio project .zip (Build screen, or attach it in chat and say "build"); unzips, creates a repo, builds with the project's own Gradle wrapper, AI fixes build errors; any model can also read the zip in chat | `builder/ZipImport.kt` |
