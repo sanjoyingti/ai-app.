@@ -10,6 +10,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aiapp.data.ApiKeys
+import com.aiapp.data.ChatStore
+import com.aiapp.data.Conversation
 import com.aiapp.llm.ChatMessage
 import com.aiapp.llm.Effort
 import com.aiapp.llm.ModelInfo
@@ -20,9 +22,11 @@ import com.aiapp.llm.Providers
 import com.aiapp.llm.Role
 import com.aiapp.llm.WebTools
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.util.UUID
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -36,6 +40,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("chat_prefs", Context.MODE_PRIVATE)
 
     val messages = mutableStateListOf<ChatMessage>()
+
+    private val store = ChatStore(app)
+    private var conversationId: String = prefs.getString("current_chat", null) ?: UUID.randomUUID().toString()
+
+    /** Saved chats for the Chats screen, newest first. */
+    var history by mutableStateOf<List<Conversation>>(emptyList())
+        private set
 
     var streamingText by mutableStateOf("")
         private set
@@ -130,7 +141,46 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        store.load(conversationId)?.let { messages.addAll(it.messages) }
         refreshModels()
+    }
+
+    fun refreshHistory() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = store.list()
+            launch(Dispatchers.Main) { history = list }
+        }
+    }
+
+    fun openChat(id: String) {
+        stop()
+        val c = store.load(id) ?: return
+        conversationId = c.id
+        prefs.edit().putString("current_chat", c.id).apply()
+        messages.clear()
+        messages.addAll(c.messages)
+        error = null
+    }
+
+    fun deleteChat(id: String) {
+        store.delete(id)
+        if (id == conversationId) newChat()
+        refreshHistory()
+    }
+
+    private fun persist() {
+        if (messages.isEmpty()) return
+        val title = messages.firstOrNull { it.role == Role.USER }?.text?.lines()?.firstOrNull()?.take(60) ?: "Chat"
+        val c = Conversation(
+            id = conversationId,
+            title = title,
+            updated = System.currentTimeMillis(),
+            provider = provider.label,
+            model = model,
+            messages = messages.toList(),
+        )
+        prefs.edit().putString("current_chat", conversationId).apply()
+        viewModelScope.launch(Dispatchers.IO) { store.save(c) }
     }
 
     fun key(p: ProviderId): String = keys.get(p)
@@ -295,12 +345,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         stop()
         messages.clear()
         error = null
+        conversationId = UUID.randomUUID().toString()
+        prefs.edit().putString("current_chat", conversationId).apply()
     }
 
     private fun finishStream() {
         val stripped = streamingText.replace(WebTools.searchTag, "").replace(WebTools.fetchTag, "")
             .replace(WebTools.downloadTag, "").trim()
         if (stripped.isNotBlank()) messages += ChatMessage(Role.ASSISTANT, stripped)
+        persist()
         streamingText = ""
         status = null
         streaming = false

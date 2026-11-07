@@ -52,7 +52,7 @@ import com.aiapp.llm.Role
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () -> Unit) {
+fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () -> Unit, onOpenHistory: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -66,8 +66,9 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
             TopAppBar(
                 title = { Text("AI App") },
                 actions = {
-                    TextButton(onClick = onOpenBuild) { Text("Build app") }
-                    TextButton(onClick = vm::newChat) { Text("New chat") }
+                    TextButton(onClick = onOpenBuild) { Text("Build") }
+                    TextButton(onClick = onOpenHistory) { Text("Chats") }
+                    TextButton(onClick = vm::newChat) { Text("New") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
@@ -239,11 +240,7 @@ private fun MessageBubble(message: ChatMessage) {
         }
     } else {
         SelectionContainer {
-            Text(
-                message.text,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            MarkdownText(message.text, modifier = Modifier.fillMaxWidth())
         }
     }
 }
