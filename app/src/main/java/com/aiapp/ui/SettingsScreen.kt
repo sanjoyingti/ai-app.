@@ -172,6 +172,137 @@ private fun OfflineRow(m: OfflineModel, vm: ChatViewModel) {
 
 @Composable
 private fun GithubTokenField(vm: ChatViewModel) {
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var showAdvanced by remember { mutableStateOf(false) }
+    var clientId by remember { mutableStateOf(vm.githubClientId()) }
+    var token by remember { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        HorizontalDivider()
+        Text("GitHub (for Build app)", style = MaterialTheme.typography.titleMedium)
+        val code = vm.githubCode
+        when {
+            vm.githubToken().isNotBlank() -> {
+                Text(
+                    "Signed in as ${vm.githubUser.ifBlank { "your GitHub account" }}. " +
+                        "New apps get their own repo on your account automatically.",
+                )
+                OutlinedButton(onClick = vm::signOutGithub) { Text("Sign out") }
+            }
+            code != null -> {
+                Text("Enter this code on GitHub, then come back:")
+                Text(code.userCode, style = MaterialTheme.typography.headlineMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(code.userCode)) }) { Text("Copy code") }
+                    OutlinedButton(onClick = { uri.openUri(code.verificationUri) }) { Text("Open GitHub") }
+                }
+                Text("Waiting for you to approve…", style = MaterialTheme.typography.bodySmall)
+            }
+            else -> {
+                Button(onClick = { vm.signInGithub { link -> uri.openUri(link) } }) { Text("Sign in with GitHub") }
+                Text(
+                    "You approve once on github.com; the app can then create repos and build APKs for you.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        vm.githubLoginError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+
+        TextButton(onClick = { showAdvanced = !showAdvanced }) { Text(if (showAdvanced) "Hide advanced" else "Advanced") }
+        if (showAdvanced) {
+            OutlinedTextField(
+                value = clientId,
+                onValueChange = { clientId = it },
+                label = { Text("GitHub OAuth Client ID") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "From github.com/settings/developers → OAuth Apps (tick \"Enable Device Flow\").",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = { vm.saveGithubClientId(clientId.trim()) }) { Text("Save Client ID") }
+            OutlinedTextField(
+                value = token,
+                onValueChange = { token = it },
+                label = { Text("Or paste a personal access token") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Classic token with public_repo and workflow scopes, from github.com/settings/tokens.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = {
+                vm.saveGithubToken(token)
+                token = ""
+            }, enabled = token.isNotBlank()) { Text("Save token") }
+        }
+    }
+}
+
+@Composable
+private fun OfflineSection(vm: ChatViewModel) {
+    val recommended = vm.recommendedOffline()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HorizontalDivider()
+        Text("Offline models", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Run on this phone with no internet or API key. Your phone has about ${vm.deviceRamGb()} GB " +
+                "of RAM, so ${recommended.name} is recommended. Keep the app open while it downloads; " +
+                "an interrupted download resumes where it stopped.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        vm.offlineModels().forEach { OfflineRow(it, vm) }
+        AddOfflineModel(vm)
+    }
+}
+
+@Composable
+private fun OfflineRow(m: OfflineModel, vm: ChatViewModel) {
+    val progress = vm.downloads[m.id]
+    val downloaded = vm.offlineDownloaded(m)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(m.name, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            when {
+                downloaded -> "Downloaded · ready offline"
+                progress != null -> "Downloading… ${(progress * 100).toInt()}%"
+                m.approxSizeGb == 0.0 -> "From huggingface.co/${m.repo}"
+                else -> "About ${m.approxSizeGb} GB · needs ${m.minRamGb} GB+ RAM"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (progress != null) {
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                downloaded -> {
+                    Button(onClick = { vm.useOffline(m) }) { Text("Use") }
+                    OutlinedButton(onClick = { vm.deleteOffline(m) }) { Text("Delete") }
+                }
+                progress != null -> OutlinedButton(onClick = { vm.cancelDownload(m) }) { Text("Pause") }
+                else -> {
+                    Button(onClick = { vm.downloadOffline(m) }) { Text("Download") }
+                    if (m.id.startsWith("hf-")) OutlinedButton(onClick = { vm.deleteOffline(m) }) { Text("Remove") }
+                }
+            }
+        }
+        vm.downloadErrors[m.id]?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+@Composable
+private fun GithubTokenField(vm: ChatViewModel) {
     var text by remember { mutableStateOf(vm.githubToken()) }
     var note by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

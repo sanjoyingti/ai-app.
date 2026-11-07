@@ -209,7 +209,69 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return null
     }
 
-    fun saveGithubToken(value: String) = keys.setExtra("GITHUB", value)
+    fun saveGithubToken(value: String) {
+        keys.setExtra("GITHUB", value)
+        githubUser = if (value.isBlank()) "" else githubUser
+        if (value.isNotBlank()) refreshGithubUser()
+    }
+
+    // ---- Sign in with GitHub (device flow) ----
+
+    var githubUser by mutableStateOf(keys.getExtra("GITHUB_USER"))
+        private set
+    var githubCode by mutableStateOf<com.aiapp.builder.GitHubLogin.DeviceCode?>(null)
+        private set
+    var githubLoginError by mutableStateOf<String?>(null)
+        private set
+    private var loginJob: Job? = null
+
+    fun githubClientId(): String = keys.getExtra("GITHUB_CLIENT_ID").ifBlank { com.aiapp.builder.GitHubLogin.DEFAULT_CLIENT_ID }
+
+    fun saveGithubClientId(value: String) = keys.setExtra("GITHUB_CLIENT_ID", value)
+
+    /** Starts sign-in; [openBrowser] opens github.com/login/device where you enter the code. */
+    fun signInGithub(openBrowser: (String) -> Unit) {
+        val clientId = githubClientId()
+        if (clientId.isBlank()) {
+            githubLoginError = "Add the GitHub Client ID first (see the steps below)."
+            return
+        }
+        loginJob?.cancel()
+        githubLoginError = null
+        loginJob = viewModelScope.launch {
+            try {
+                val code = com.aiapp.builder.GitHubLogin.start(clientId)
+                githubCode = code
+                openBrowser(code.verificationUri)
+                val token = com.aiapp.builder.GitHubLogin.waitForToken(clientId, code)
+                keys.setExtra("GITHUB", token)
+                refreshGithubUser()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                githubLoginError = e.message ?: "Sign-in failed."
+            } finally {
+                githubCode = null
+            }
+        }
+    }
+
+    fun signOutGithub() {
+        loginJob?.cancel()
+        keys.setExtra("GITHUB", "")
+        keys.setExtra("GITHUB_USER", "")
+        githubUser = ""
+    }
+
+    private fun refreshGithubUser() {
+        val token = keys.getExtra("GITHUB")
+        viewModelScope.launch {
+            runCatching { com.aiapp.builder.GitHubClient(token).login() }.onSuccess {
+                githubUser = it
+                keys.setExtra("GITHUB_USER", it)
+            }
+        }
+    }
 
     fun saveKey(p: ProviderId, value: String) {
         keys.set(p, value)

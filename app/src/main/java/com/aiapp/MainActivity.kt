@@ -14,6 +14,8 @@ import com.aiapp.ui.BuildScreen
 import com.aiapp.ui.BuildViewModel
 import com.aiapp.ui.ChatScreen
 import com.aiapp.ui.ChatViewModel
+import com.aiapp.ui.CreateScreen
+import com.aiapp.ui.CreateViewModel
 import com.aiapp.ui.HistoryScreen
 import com.aiapp.ui.SettingsScreen
 
@@ -26,14 +28,17 @@ class MainActivity : ComponentActivity() {
                 var screen by rememberSaveable { mutableStateOf("chat") }
                 BackHandler(enabled = screen != "chat") { screen = "chat" }
                 val buildVm: BuildViewModel = viewModel()
+                val createVm: CreateViewModel = viewModel()
                 when (screen) {
                     "chat" -> ChatScreen(
                         vm,
                         onOpenSettings = { screen = "settings" },
                         onOpenBuild = { screen = "build" },
                         onOpenHistory = { screen = "history" },
+                        onOpenCreate = { screen = "create" },
                     )
                     "history" -> HistoryScreen(vm, onBack = { screen = "chat" })
+                    "create" -> CreateScreen(createVm, onBack = { screen = "chat" }, onOpenSettings = { screen = "settings" })
                     "build" -> BuildScreen(vm, buildVm, onBack = { screen = "chat" }, onOpenSettings = { screen = "settings" })
                     else -> SettingsScreen(vm, onBack = { screen = "chat" })
                 }
