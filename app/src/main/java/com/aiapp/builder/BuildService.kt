@@ -40,26 +40,35 @@ class BuildService : Service() {
         createChannel()
         startInForeground(progressNotification("Starting…"))
 
-        BuildRunner.steps.clear()
-        BuildRunner.result = null
         BuildRunner.running = true
         job = scope.launch {
             val result = try {
-                BuildAgent(request) { line ->
-                    scope.launch {
-                        BuildRunner.steps += line
-                        notify(PROGRESS_ID, progressNotification(line))
-                    }
-                }.run()
+                BuildAgent(
+                    request,
+                    emit = { event ->
+                        scope.launch {
+                            BuildRunner.timeline += TimelineItem.Event(event)
+                            BuildRunner.save(this@BuildService)
+                            notify(PROGRESS_ID, progressNotification(event.text))
+                        }
+                    },
+                    onProject = { p ->
+                        scope.launch {
+                            BuildRunner.project = p
+                            BuildRunner.save(this@BuildService)
+                        }
+                    },
+                ).run()
             } catch (e: CancellationException) {
                 BuildResult(false, "Stopped.")
             } catch (e: Throwable) {
                 BuildResult(false, friendly(e))
             }
-            BuildRunner.result = result
+            BuildRunner.timeline += TimelineItem.Result(result.success, result.message, result.apkUrl, result.repoUrl)
             BuildRunner.running = false
+            BuildRunner.save(this@BuildService)
             stopForeground(STOP_FOREGROUND_REMOVE)
-            notify(DONE_ID, doneNotification(request.appName, result))
+            notify(DONE_ID, doneNotification(request.project?.appName ?: request.appName, result))
             stopSelf()
         }
         return START_NOT_STICKY
@@ -116,7 +125,7 @@ class BuildService : Service() {
         } ?: openAppIntent()
         return Notification.Builder(this, CHANNEL_DONE)
             .setSmallIcon(if (r.success) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentTitle(if (r.success) "$appName is ready" else "$appName didn't build")
+            .setContentTitle(if (r.success) "${appName.ifBlank { "Your app" }} is ready" else "${appName.ifBlank { "Your app" }} didn't build")
             .setContentText(if (r.success && r.apkUrl != null) "Tap to download the APK" else r.message)
             .setAutoCancel(true)
             .setContentIntent(tap)
@@ -142,9 +151,9 @@ class BuildService : Service() {
         fun start(context: Context, request: BuildRequest) {
             if (BuildRunner.running) return
             BuildRunner.pending = request
-            BuildRunner.steps.clear()
-            BuildRunner.result = null
+            BuildRunner.timeline += TimelineItem.User(request.description)
             BuildRunner.running = true
+            BuildRunner.save(context)
             context.startForegroundService(Intent(context, BuildService::class.java))
         }
 

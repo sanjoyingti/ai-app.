@@ -1,0 +1,38 @@
+package com.aiapp.builder
+
+import kotlinx.serialization.Serializable
+
+/** One line in the agent timeline. */
+@Serializable
+data class BuildEvent(val kind: Kind, val text: String) {
+    @Serializable
+    enum class Kind { STEP, THINKING, WEB, FILE, LIBRARY, DOWNLOAD, BUILD, ERROR, DONE }
+}
+
+/** Something shown in the Build Mode conversation. */
+@Serializable
+sealed class TimelineItem {
+    @Serializable
+    data class User(val text: String) : TimelineItem()
+
+    @Serializable
+    data class Event(val event: BuildEvent) : TimelineItem()
+
+    @Serializable
+    data class Result(val success: Boolean, val message: String, val apkUrl: String? = null, val repoUrl: String? = null) : TimelineItem()
+}
+
+/** The app being built, kept between requests so follow-ups edit the same project. */
+@Serializable
+data class Project(
+    val appName: String,
+    val packageName: String,
+    val owner: String,
+    val repo: String,
+    val branch: String,
+    val repoUrl: String,
+    val description: String,
+    val files: Map<String, String> = emptyMap(),
+    val deps: List<String> = emptyList(),
+    val lastApkUrl: String? = null,
+)

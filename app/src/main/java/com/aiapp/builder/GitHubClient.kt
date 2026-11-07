@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -70,8 +71,11 @@ class GitHubClient(private val token: String) {
         )
     }
 
-    /** Commits [files] (path → content) on top of the branch in one commit. Returns the commit SHA. */
-    suspend fun commit(repo: Repo, files: Map<String, ByteArray>, message: String): String {
+    /**
+     * Commits [files] (path → content, or null to delete) on top of the branch in one commit.
+     * Returns the commit SHA.
+     */
+    suspend fun commit(repo: Repo, files: Map<String, ByteArray?>, message: String): String {
         val base = "/repos/${repo.owner}/${repo.name}"
         // auto_init can take a moment before the branch exists.
         var ref: JsonElement? = null
@@ -86,10 +90,12 @@ class GitHubClient(private val token: String) {
             ?.let { (it["sha"] as? JsonPrimitive)?.contentOrNull }
 
         val entries = files.map { (path, bytes) ->
-            val blob = call("POST", "$base/git/blobs", buildJsonObject {
-                put("content", Base64.getEncoder().encodeToString(bytes))
-                put("encoding", "base64")
-            }).str("sha")!!
+            val blob = bytes?.let {
+                call("POST", "$base/git/blobs", buildJsonObject {
+                    put("content", Base64.getEncoder().encodeToString(it))
+                    put("encoding", "base64")
+                }).str("sha")!!
+            }
             path to blob
         }
         val tree = call("POST", "$base/git/trees", buildJsonObject {
@@ -100,7 +106,7 @@ class GitHubClient(private val token: String) {
                         put("path", path)
                         put("mode", if (path == "gradlew") "100755" else "100644")
                         put("type", "blob")
-                        put("sha", sha)
+                        if (sha == null) put("sha", JsonNull) else put("sha", sha)
                     }
                 }
             }
