@@ -1,6 +1,6 @@
 # Autonomous Mobile AI App: Master Blueprint
 
-Version 1.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
+Version 1.1 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
 
 ## 0. What you asked for
 
@@ -84,6 +84,12 @@ flowchart TB
 
 The app queries each provider's list-models endpoint, so new models (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1, all Gemini and GPT models) appear without an app update.
 
+**Most advanced first (v0.2, `ModelRanking.kt`):** the picker sorts each list so the strongest model is on top, marked ★, and is chosen by default.
+- Claude: Fable → Opus → Sonnet → Haiku, newest version first within each.
+- Gemini: Deep Think / Ultra → Pro → Flash → Flash-Lite, newest first.
+- ChatGPT: newest version first, then Pro → standard → mini → nano.
+- Stable names sort before dated or preview snapshots.
+
 ### 4.3 Effort levels (the app's "brain")
 
 | Level | Model tier | Reasoning | Agent behaviour |
@@ -94,11 +100,28 @@ The app queries each provider's list-models endpoint, so new models (Opus 5.5, S
 | Max | Strongest available | Maximum | Plan → build → emulator test, 10 rounds |
 | Auto | Chosen per task | — | — |
 
-Each level maps to that provider's own reasoning setting (Claude thinking budget, OpenAI `reasoning_effort`, Gemini thinking budget). If a model rejects the setting, the app retries without it.
+Each level maps to that provider's own reasoning setting. If a model rejects a setting, the app tries the next one down (`fallbackChain` in `Models.kt`):
+
+| Provider | Low / Medium / High / Max | Fallbacks |
+|---|---|---|
+| Claude | Adaptive thinking + `output_config.effort` = low / medium / high / max (Opus 5.5, Fable 5.1 and other new models) | Max → high; then the old `budget_tokens` format; then defaults |
+| ChatGPT | `reasoning_effort` = low / medium / high / xhigh | xhigh → high; then defaults |
+| Gemini | Thinking budget 0 / default / 8K / 24K | Defaults |
+| Offline | Instruction in the system prompt (short / normal / step by step / careful + self-check) | — |
 
 ## 5. Offline engine
 
-- **On the phone:**
+**Built in v0.2 (`OfflineProvider.kt`):** an **Offline** provider in the picker, powered by Google's LiteRT-LM runtime.
+- **Gemma 4 E4B** (about 3.7 GB, phones with 8 GB+ RAM): the most advanced model that runs well on a phone. Text, images and 140+ languages, Apache 2.0 licence.
+- **Gemma 4 E2B** (about 2.6 GB): for phones with less RAM.
+- Settings → Offline models: shows your RAM and the recommended model, with Download (resumable), Pause, Use and Delete.
+- Files come from Hugging Face (`litert-community`) and are stored in the app's private storage. The model runs on the GPU, falling back to the CPU.
+
+**Biggest open models, no size limit (home brain, next phase):**
+- Kimi K2.x, DeepSeek V4, GLM-5.2 and Qwen 3.5 (122B–397B) are the strongest open-weight models. They need a PC or GPU server, so the phone reaches them over home WiFi or a private tunnel.
+- Only the official releases are used. Uncensored ("abliterated") re-releases are excluded, in line with §10.
+
+**Later additions:**
   - Qwen 3.5 family as the main brain: 9B needs about 8 GB RAM, with 2B/4B for smaller phones.
   - Gemma 4 E2B/E4B for vision and audio.
   - 14–27B on phones with 16 GB or more.
@@ -241,7 +264,8 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 | 3 | Voice with barge-in (Spec 1) | Stops within 150 ms when you talk |
 | 4 | File upload + RAG, image/video generation | Answers cite files; prompt → clip |
 | 5 | App-building agent via GitHub Actions (Spec 2) | Described app → installable APK link |
-| 6 | Offline llama.cpp model + home brain, safety module wired in | Chat works in airplane mode |
+| 6a ✅ (v0.2) | Offline Gemma 4 E4B/E2B via LiteRT-LM; most-advanced-first model picker; new Claude/ChatGPT effort settings | Chat works in airplane mode |
+| 6b | llama.cpp (Qwen 3.5) + home brain for the biggest open models, safety module wired in | Home brain answers over WiFi |
 | 7 | On-device toolchain + agent internet access | Same app builds offline on the phone |
 
 ## 13. Risks and open decisions
@@ -263,3 +287,7 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 - Real-time video generation 2026: https://www.gmicloud.ai/en/blog/real-time-video-generation-platforms
 - Text-to-video API changes 2026: https://www.forasoft.com/blog/article/text-to-video-api-comparison
 - AndroidIDE: https://github.com/m245seed/AndroidIDE
+- Claude effort parameter: https://platform.claude.com/docs/en/build-with-claude/effort
+- Gemma 4 on the edge (Google, 2 Apr 2026): https://developers.googleblog.com/en/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/
+- LiteRT-LM on Android: https://developers.google.com/edge/litert-lm/android
+- Gemma 4 E4B LiteRT-LM model: https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm

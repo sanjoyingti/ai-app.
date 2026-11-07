@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -12,6 +13,7 @@ import com.aiapp.data.ApiKeys
 import com.aiapp.llm.ChatMessage
 import com.aiapp.llm.Effort
 import com.aiapp.llm.ModelInfo
+import com.aiapp.llm.OfflineModel
 import com.aiapp.llm.ProviderException
 import com.aiapp.llm.ProviderId
 import com.aiapp.llm.Providers
@@ -24,6 +26,10 @@ import java.io.IOException
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val keys = ApiKeys(app)
+
+    init {
+        Providers.init(app)
+    }
     private val prefs = app.getSharedPreferences("chat_prefs", Context.MODE_PRIVATE)
 
     val messages = mutableStateListOf<ChatMessage>()
@@ -53,6 +59,62 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     private var job: Job? = null
+
+    /** Download progress (0..1) for offline models being downloaded, by model id. */
+    val downloads = mutableStateMapOf<String, Float>()
+    val downloadErrors = mutableStateMapOf<String, String>()
+    private val downloadJobs = mutableMapOf<String, Job>()
+
+    /** Bumped when an offline model is downloaded or deleted, so the UI re-reads file state. */
+    var offlineVersion by mutableStateOf(0)
+        private set
+
+    fun deviceRamGb(): Int = Providers.offline.deviceRamGb()
+
+    fun recommendedOffline(): OfflineModel = Providers.offline.recommended()
+
+    fun offlineDownloaded(m: OfflineModel): Boolean {
+        offlineVersion // read so Compose recomposes after changes
+        return Providers.offline.isDownloaded(m)
+    }
+
+    fun downloadOffline(m: OfflineModel) {
+        if (downloadJobs[m.id]?.isActive == true) return
+        downloadErrors.remove(m.id)
+        downloads[m.id] = 0f
+        downloadJobs[m.id] = viewModelScope.launch {
+            try {
+                Providers.offline.download(m) { p -> viewModelScope.launch { if (m.id in downloads) downloads[m.id] = p } }
+                offlineVersion++
+                if (provider == ProviderId.OFFLINE) refreshModels()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                downloadErrors[m.id] = friendly(e)
+            } finally {
+                downloads.remove(m.id)
+                downloadJobs.remove(m.id)
+            }
+        }
+    }
+
+    fun cancelDownload(m: OfflineModel) {
+        downloadJobs[m.id]?.cancel()
+    }
+
+    fun deleteOffline(m: OfflineModel) {
+        viewModelScope.launch {
+            Providers.offline.delete(m)
+            offlineVersion++
+            if (provider == ProviderId.OFFLINE) refreshModels()
+        }
+    }
+
+    /** Switches the chat to this offline model. */
+    fun useOffline(m: OfflineModel) {
+        selectProvider(ProviderId.OFFLINE)
+        selectModel(m.id)
+    }
 
     init {
         refreshModels()
@@ -87,14 +149,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshModels() {
         val p = provider
         val k = keys.get(p)
-        if (k.isBlank()) {
+        if (p.needsKey && k.isBlank()) {
             error = "Add your ${p.label} API key in Settings."
             return
         }
         loadingModels = true
         viewModelScope.launch {
             try {
-                val list = Providers.get(p).listModels(k)
+                val list = Providers.rankedModels(p, k)
                 if (p == provider) {
                     models = list
                     error = null
@@ -114,7 +176,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || streaming) return
         val k = keys.get(provider)
-        if (k.isBlank()) {
+        if (provider.needsKey && k.isBlank()) {
             error = "Add your ${provider.label} API key in Settings."
             return
         }
@@ -131,7 +193,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
         streaming = true
         streamingText = ""
-        status = "Thinking…"
+        status = if (p == ProviderId.OFFLINE) "Loading offline model…" else "Thinking…"
         job = viewModelScope.launch {
             try {
                 Providers.get(p).stream(k, m, history, e, SYSTEM_PROMPT).collect { delta ->

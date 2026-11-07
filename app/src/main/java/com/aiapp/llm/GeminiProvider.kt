@@ -31,7 +31,7 @@ class GeminiProvider : LlmProvider {
             if ("generateContent" !in methods || !name.contains("gemini")) return@mapNotNull null
             val id = name.removePrefix("models/")
             ModelInfo(id, (o["displayName"] as? JsonPrimitive)?.contentOrNull ?: id)
-        }.sortedByDescending { it.id }
+        }
     }
 
     private fun thinkingBudget(effort: Effort): Int? = when (effort) {

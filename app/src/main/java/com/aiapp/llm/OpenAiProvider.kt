@@ -33,14 +33,14 @@ class OpenAiProvider : LlmProvider {
                 (id.startsWith("gpt") || id.startsWith("chatgpt") || Regex("^o\\d").containsMatchIn(id)) &&
                     excluded.none { id.contains(it) }
             }
-            .sortedDescending()
             .map { ModelInfo(it, it) }
     }
 
     private fun effortValue(effort: Effort): String? = when (effort) {
         Effort.LOW -> "low"
         Effort.MEDIUM -> "medium"
-        Effort.HIGH, Effort.MAX -> "high"
+        Effort.HIGH -> "high"
+        Effort.MAX -> "xhigh"
         Effort.AUTO -> null
     }
 
@@ -50,10 +50,15 @@ class OpenAiProvider : LlmProvider {
         messages: List<ChatMessage>,
         effort: Effort,
         system: String,
-    ): Flow<String> = fallbackOn400(
-        primary = { request(apiKey, model, messages, system, effortValue(effort)) },
-        fallback = { request(apiKey, model, messages, system, null) },
-    )
+    ): Flow<String> {
+        val level = effortValue(effort)
+        val attempts = mutableListOf<() -> Flow<String>>()
+        if (level != null) attempts += { request(apiKey, model, messages, system, level) }
+        // Models without the top level fall back to "high".
+        if (level == "xhigh") attempts += { request(apiKey, model, messages, system, "high") }
+        attempts += { request(apiKey, model, messages, system, null) }
+        return fallbackChain(attempts)
+    }
 
     private fun request(
         apiKey: String,

@@ -1,13 +1,13 @@
 package com.aiapp.llm
 
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 
-enum class ProviderId(val label: String) {
+enum class ProviderId(val label: String, val needsKey: Boolean = true) {
     CLAUDE("Claude"),
     GEMINI("Gemini"),
     OPENAI("ChatGPT"),
+    OFFLINE("Offline", needsKey = false),
 }
 
 /** Effort controls how hard the model thinks. AUTO leaves it to the provider's default. */
@@ -43,15 +43,26 @@ interface LlmProvider {
  * Runs [primary]; if it is rejected with HTTP 400 before any text arrives (usually because the
  * model doesn't accept a reasoning setting), runs [fallback] instead.
  */
-fun fallbackOn400(primary: () -> Flow<String>, fallback: () -> Flow<String>): Flow<String> = flow {
-    var emitted = false
-    try {
-        primary().collect {
-            emitted = true
-            emit(it)
+fun fallbackOn400(primary: () -> Flow<String>, fallback: () -> Flow<String>): Flow<String> =
+    fallbackChain(listOf(primary, fallback))
+
+/**
+ * Tries each request in order, moving to the next one only when the previous was rejected with
+ * HTTP 400 before any text arrived. Lets the newest reasoning settings be tried first, with older
+ * formats as backups for models that don't accept them.
+ */
+fun fallbackChain(attempts: List<() -> Flow<String>>): Flow<String> = flow {
+    for ((index, attempt) in attempts.withIndex()) {
+        var emitted = false
+        try {
+            attempt().collect {
+                emitted = true
+                emit(it)
+            }
+            return@flow
+        } catch (e: ProviderException) {
+            if (e.code != 400 || emitted || index == attempts.lastIndex) throw e
         }
-    } catch (e: ProviderException) {
-        if (e.code == 400 && !emitted) emitAll(fallback()) else throw e
     }
 }
 
@@ -62,5 +73,20 @@ object Providers {
         OpenAiProvider(),
     ).associateBy { it.id }
 
-    fun get(id: ProviderId): LlmProvider = all.getValue(id)
+    private lateinit var offlineProvider: OfflineProvider
+
+    /** Call once at startup: the offline engine needs the app's storage. */
+    fun init(context: android.content.Context) {
+        if (!::offlineProvider.isInitialized) offlineProvider = OfflineProvider(context)
+    }
+
+    val offline: OfflineProvider get() = offlineProvider
+
+    fun get(id: ProviderId): LlmProvider = if (id == ProviderId.OFFLINE) offlineProvider else all.getValue(id)
+
+    /** Live model list for [id], most advanced first. Offline models keep their catalog order. */
+    suspend fun rankedModels(id: ProviderId, apiKey: String): List<ModelInfo> {
+        val list = get(id).listModels(apiKey)
+        return if (id == ProviderId.OFFLINE) list else ModelRanking.rank(id, list)
+    }
 }

@@ -11,6 +11,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.aiapp.llm.OfflineCatalog
+import com.aiapp.llm.OfflineModel
 import com.aiapp.llm.ProviderId
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,7 +63,8 @@ fun SettingsScreen(vm: ChatViewModel, onBack: () -> Unit) {
                 "API keys are stored encrypted on this phone only.",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            ProviderId.entries.forEach { KeyField(it, vm) }
+            ProviderId.entries.filter { it.needsKey }.forEach { KeyField(it, vm) }
+            OfflineSection(vm)
         }
     }
 }
@@ -67,6 +73,7 @@ private fun keyUrl(p: ProviderId): String = when (p) {
     ProviderId.CLAUDE -> "console.anthropic.com/settings/keys"
     ProviderId.GEMINI -> "aistudio.google.com/apikey"
     ProviderId.OPENAI -> "platform.openai.com/api-keys"
+    ProviderId.OFFLINE -> ""
 }
 
 @Composable
@@ -102,6 +109,57 @@ private fun KeyField(p: ProviderId, vm: ChatViewModel) {
                 note = "Cleared"
             }) { Text("Clear") }
             note?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+        }
+    }
+}
+
+@Composable
+private fun OfflineSection(vm: ChatViewModel) {
+    val recommended = vm.recommendedOffline()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HorizontalDivider()
+        Text("Offline models", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Run on this phone with no internet or API key. Your phone has about ${vm.deviceRamGb()} GB " +
+                "of RAM, so ${recommended.name} is recommended. Keep the app open while it downloads; " +
+                "an interrupted download resumes where it stopped.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OfflineCatalog.models.forEach { OfflineRow(it, vm) }
+    }
+}
+
+@Composable
+private fun OfflineRow(m: OfflineModel, vm: ChatViewModel) {
+    val progress = vm.downloads[m.id]
+    val downloaded = vm.offlineDownloaded(m)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(m.name, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            when {
+                downloaded -> "Downloaded · ready offline"
+                progress != null -> "Downloading… ${(progress * 100).toInt()}%"
+                else -> "About ${m.approxSizeGb} GB · needs ${m.minRamGb} GB+ RAM"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (progress != null) {
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                downloaded -> {
+                    Button(onClick = { vm.useOffline(m) }) { Text("Use") }
+                    OutlinedButton(onClick = { vm.deleteOffline(m) }) { Text("Delete") }
+                }
+                progress != null -> OutlinedButton(onClick = { vm.cancelDownload(m) }) { Text("Pause") }
+                else -> Button(onClick = { vm.downloadOffline(m) }) { Text("Download") }
+            }
+        }
+        vm.downloadErrors[m.id]?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
 }
