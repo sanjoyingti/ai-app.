@@ -22,7 +22,7 @@ object GitHubLogin {
      * Client ID of the AI App OAuth app (public, not a secret). Created at
      * github.com/settings/developers with "Enable Device Flow" ticked. Can be overridden in Settings.
      */
-    const val DEFAULT_CLIENT_ID = ""
+    const val DEFAULT_CLIENT_ID = "Ov23li27PSK4KPEitrSN"
 
     const val SCOPES = "public_repo workflow"
 
