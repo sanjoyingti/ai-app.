@@ -73,6 +73,7 @@ private fun keyUrl(p: ProviderId): String = when (p) {
     ProviderId.CLAUDE -> "console.anthropic.com/settings/keys"
     ProviderId.GEMINI -> "aistudio.google.com/apikey"
     ProviderId.OPENAI -> "platform.openai.com/api-keys"
+    ProviderId.OPEN -> "openrouter.ai/keys (one key for Kimi, DeepSeek, GLM, Qwen; some are free)"
     ProviderId.OFFLINE -> ""
 }
 

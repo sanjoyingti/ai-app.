@@ -1,6 +1,6 @@
 # Autonomous Mobile AI App: Master Blueprint
 
-Version 1.1 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
+Version 1.2 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoyingti/ai-app.
 
 ## 0. What you asked for
 
@@ -117,9 +117,12 @@ Each level maps to that provider's own reasoning setting. If a model rejects a s
 - Settings → Offline models: shows your RAM and the recommended model, with Download (resumable), Pause, Use and Delete.
 - Files come from Hugging Face (`litert-community`) and are stored in the app's private storage. The model runs on the GPU, falling back to the CPU.
 
-**Biggest open models, no size limit (home brain, next phase):**
-- Kimi K2.x, DeepSeek V4, GLM-5.2 and Qwen 3.5 (122B–397B) are the strongest open-weight models. They need a PC or GPU server, so the phone reaches them over home WiFi or a private tunnel.
-- Only the official releases are used. Uncensored ("abliterated") re-releases are excluded, in line with §10.
+**Biggest open models, no size limit (v0.3, `OpenModelsProvider.kt`, no PC needed):**
+- An **Open models** provider in the picker reaches Kimi K2.x, DeepSeek V4, GLM-5.2, Qwen 3.5 (up to 397B), MiniMax, gpt-oss, Llama, Mistral and Gemma, hosted in the cloud by OpenRouter.
+- One OpenRouter key (openrouter.ai/keys) covers all of them, billed per use. Some models have free versions, marked "(free)".
+- Brain levels map to OpenRouter's `reasoning_effort` (Max → xhigh, falling back to high).
+- Only the official releases are listed. Uncensored ("abliterated") re-releases are filtered out, in line with §10.
+- A home PC is optional later; it is not needed.
 
 **Later additions:**
   - Qwen 3.5 family as the main brain: 9B needs about 8 GB RAM, with 2B/4B for smaller phones.
@@ -265,7 +268,8 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 | 4 | File upload + RAG, image/video generation | Answers cite files; prompt → clip |
 | 5 | App-building agent via GitHub Actions (Spec 2) | Described app → installable APK link |
 | 6a ✅ (v0.2) | Offline Gemma 4 E4B/E2B via LiteRT-LM; most-advanced-first model picker; new Claude/ChatGPT effort settings | Chat works in airplane mode |
-| 6b | llama.cpp (Qwen 3.5) + home brain for the biggest open models, safety module wired in | Home brain answers over WiFi |
+| 6b ✅ (v0.3) | Biggest open models in the cloud via OpenRouter (no PC) | Kimi/DeepSeek/GLM/Qwen answer in chat |
+| 6c | llama.cpp (Qwen 3.5 GGUF) on the phone, safety module wired in | Any GGUF model runs offline |
 | 7 | On-device toolchain + agent internet access | Same app builds offline on the phone |
 
 ## 13. Risks and open decisions
@@ -290,4 +294,5 @@ Planner → Builder → Fixer → Tester → Packager, with progress lines strea
 - Claude effort parameter: https://platform.claude.com/docs/en/build-with-claude/effort
 - Gemma 4 on the edge (Google, 2 Apr 2026): https://developers.googleblog.com/en/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/
 - LiteRT-LM on Android: https://developers.google.com/edge/litert-lm/android
+- OpenRouter chat completions (reasoning_effort): https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request
 - Gemma 4 E4B LiteRT-LM model: https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm

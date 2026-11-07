@@ -7,6 +7,7 @@ enum class ProviderId(val label: String, val needsKey: Boolean = true) {
     CLAUDE("Claude"),
     GEMINI("Gemini"),
     OPENAI("ChatGPT"),
+    OPEN("Open models"),
     OFFLINE("Offline", needsKey = false),
 }
 
@@ -71,6 +72,7 @@ object Providers {
         AnthropicProvider(),
         GeminiProvider(),
         OpenAiProvider(),
+        OpenModelsProvider(),
     ).associateBy { it.id }
 
     private lateinit var offlineProvider: OfflineProvider

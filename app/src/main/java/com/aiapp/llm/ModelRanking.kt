@@ -16,7 +16,12 @@ object ModelRanking {
             "deep-think" to 60, "ultra" to 55, "pro" to 50, "flash-lite" to 20, "flash" to 30, "nano" to 10,
         ),
         ProviderId.OPENAI to listOf(
-            "-pro" to 50, "nano" to 10, "mini" to 20,
+            "-pro" to 50, "sol" to 45, "nano" to 10, "mini" to 20, "luna" to 30,
+        ),
+        // Biggest open-weight model lines first.
+        ProviderId.OPEN to listOf(
+            "kimi" to 60, "deepseek" to 55, "glm" to 50, "qwen" to 45, "minimax" to 40,
+            "gpt-oss" to 35, "llama" to 30, "mistral" to 25, "gemma" to 20,
         ),
     )
 
@@ -55,7 +60,9 @@ object ModelRanking {
             .thenByDescending { familyScore(provider, it.id) }
         val primary = if (provider == ProviderId.OPENAI) byVersion else byFamily
         val sorted = models.sortedWith(
-            primary.thenBy { isPreviewOrDated(it.id) }.thenBy { it.id },
+            primary.thenBy { isPreviewOrDated(it.id) }
+                .thenBy { it.id.endsWith(":free") }
+                .thenBy { it.id },
         )
         val best = sorted.first()
         return listOf(best.copy(name = "★ ${best.name}")) + sorted.drop(1)
