@@ -21,6 +21,8 @@ import com.aiapp.llm.ProviderId
 import com.aiapp.llm.Providers
 import com.aiapp.llm.Role
 import com.aiapp.llm.WebTools
+import com.aiapp.llm.alternativeModel
+import com.aiapp.llm.resilient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -525,7 +527,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 var steps = 0
                 while (true) {
                     streamingText = ""
-                    Providers.get(p).stream(k, m, working, e, system).collect { delta ->
+                    resilient(
+                        attempt = { model -> Providers.get(p).stream(k, model, working.toList(), e, system) },
+                        model = m,
+                        fallback = { alternativeModel(p, k, m) },
+                        onRetry = { status = it },
+                    ).collect { delta ->
                         if (status != "Writing…") status = "Writing…"
                         streamingText += delta
                     }
@@ -641,8 +648,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 "Only search the web when the question needs current information."
 
         const val SYSTEM_PROMPT =
-            "You are a helpful assistant in a mobile app. Answer clearly and concisely. " +
-                "Use Markdown for code blocks and lists."
+            "You are a helpful assistant in AI App, an Android app. Answer clearly and concisely. " +
+                "Use Markdown for code blocks and lists. About this app, so you can guide the user: the Build " +
+                "tab writes complete Android apps from a description and builds installable APKs on the user's " +
+                "GitHub (it can also compile an uploaded Android Studio project .zip); the Create tab makes " +
+                "images and videos; the mic button starts a live voice conversation; files of any type can be " +
+                "attached with +. If the user asks you to build or compile an app, help plan it and tell them " +
+                "to tap Build at the top (or attach the project .zip and say \"build this APK\")."
 
         inline fun <reified T : Enum<T>> enumValueOrDefault(name: String?, default: T): T =
             name?.let { n -> enumValues<T>().firstOrNull { it.name == n } } ?: default

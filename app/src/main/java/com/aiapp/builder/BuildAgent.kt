@@ -255,7 +255,12 @@ class BuildAgent(
         while (true) {
             val sb = StringBuilder()
             var scanned = 0
-            Providers.get(req.provider).stream(req.apiKey, req.model, working, effort, system).collect { chunk ->
+            com.aiapp.llm.resilient(
+                attempt = { model -> Providers.get(req.provider).stream(req.apiKey, model, working.toList(), effort, system) },
+                model = req.model,
+                fallback = { com.aiapp.llm.alternativeModel(req.provider, req.apiKey, req.model) },
+                onRetry = { step(BuildEvent.Kind.STEP, it) },
+            ).collect { chunk ->
                 sb.append(chunk)
                 // Announce files as their headers arrive, like an IDE agent.
                 val nl = sb.lastIndexOf("\n")
@@ -307,7 +312,8 @@ class BuildAgent(
     }
 
     private fun StringBuilder.appendFiles(hint: String = "") {
-        var budget = 60_000
+        // Offline models have a much smaller memory for text.
+        var budget = if (req.provider == ProviderId.OFFLINE) 24_000 else 60_000
         prioritized(hint).forEach { (path, content) ->
             if (budget <= 0) return@forEach
             val c = content.take(budget)

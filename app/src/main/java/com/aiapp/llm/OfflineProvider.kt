@@ -228,6 +228,29 @@ class OfflineProvider(context: Context) : LlmProvider {
         engineModelId = null
     }
 
+    /** How much text (prompt + reply, in tokens) the offline model can hold; more RAM allows more. */
+    fun contextTokens(): Int = when {
+        deviceRamGb() >= 11 -> 32_768
+        deviceRamGb() >= 7 -> 16_384
+        else -> 8_192
+    }
+
+    /** Keeps the newest messages that fit (about 3 characters per token, leaving room for the reply). */
+    private fun fit(messages: List<ChatMessage>, system: String): List<ChatMessage> {
+        var budget = (contextTokens() - 2_500) * 3 - system.length
+        val kept = ArrayDeque<ChatMessage>()
+        for (m in messages.asReversed()) {
+            val t = AttachmentContent.text(m, AttachmentContent.Target.TEXT_ONLY, false)
+            if (t.length > budget) {
+                if (kept.isEmpty()) kept.addFirst(m.copy(text = t.takeLast(budget.coerceAtLeast(2_000)), attachments = emptyList()))
+                break
+            }
+            budget -= t.length
+            kept.addFirst(m)
+        }
+        return kept.toList()
+    }
+
     /** Loads [modelId] into memory now (e.g. when voice mode starts). */
     suspend fun preload(modelId: String) {
         val m = byId(modelId) ?: return
@@ -242,9 +265,9 @@ class OfflineProvider(context: Context) : LlmProvider {
         val path = file(model).absolutePath
         val cache = appContext.cacheDir.path
         val loaded = try {
-            Engine(EngineConfig(modelPath = path, backend = Backend.GPU(), cacheDir = cache)).also { it.initialize() }
+            Engine(EngineConfig(modelPath = path, backend = Backend.GPU(), maxNumTokens = contextTokens(), cacheDir = cache)).also { it.initialize() }
         } catch (gpu: Throwable) {
-            Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), cacheDir = cache)).also { it.initialize() }
+            Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = contextTokens(), cacheDir = cache)).also { it.initialize() }
         }
         engine = loaded
         engineModelId = model.id
@@ -262,8 +285,9 @@ class OfflineProvider(context: Context) : LlmProvider {
         if (!isDownloaded(m)) {
             throw ProviderException(404, "Download ${m.name} in Settings → Offline models first.")
         }
-        val last = messages.lastOrNull { it.role == Role.USER } ?: return@flow
-        val history = messages.dropLast(1).map {
+        val fitted = fit(messages, system)
+        val last = fitted.lastOrNull { it.role == Role.USER } ?: return@flow
+        val history = fitted.dropLast(1).map {
             val t = AttachmentContent.text(it, AttachmentContent.Target.TEXT_ONLY, false)
             if (it.role == Role.USER) Message.user(t) else Message.model(t)
         }
