@@ -51,22 +51,16 @@ import kotlin.math.sin
 /** Full-screen live conversation with an animated orb. */
 @Composable
 fun VoiceScreen(
-    voice: VoiceController,
-    thinking: Boolean,
-    caption: String,
+    state: VoiceState,
+    level: Float,
+    liveLine: String,
+    error: String?,
     modelLabel: String,
-    fastModel: Boolean,
-    onToggleFast: () -> Unit,
     onTalk: () -> Unit,
     onExit: () -> Unit,
+    settings: @Composable () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
-    val state = when {
-        voice.state == VoiceState.SPEAKING -> VoiceState.SPEAKING
-        voice.state == VoiceState.LISTENING -> VoiceState.LISTENING
-        thinking || voice.state == VoiceState.THINKING -> VoiceState.THINKING
-        else -> VoiceState.IDLE
-    }
     Surface(color = Color(0xFF05070D), modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(20.dp),
@@ -77,43 +71,39 @@ fun VoiceScreen(
             Box(
                 Modifier
                     .size(260.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                        if (state == VoiceState.SPEAKING || state == VoiceState.IDLE) onTalk()
-                    },
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onTalk() },
                 contentAlignment = Alignment.Center,
-            ) { Orb(state, voice.level) }
+            ) { Orb(state, level) }
             Spacer(Modifier.padding(12.dp))
             Text(
                 when (state) {
                     VoiceState.LISTENING -> "Listening…"
                     VoiceState.THINKING -> "Thinking…"
-                    VoiceState.SPEAKING -> "Tap the orb to interrupt"
+                    VoiceState.SPEAKING -> "Speaking — just talk, or tap the orb, to interrupt"
                     VoiceState.IDLE -> "Tap the orb and speak"
                 },
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
             )
-            val line = voice.partial.ifBlank { caption }
-            if (line.isNotBlank()) {
+            if (liveLine.isNotBlank()) {
                 Text(
-                    line,
+                    liveLine,
                     color = Color.White.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
                     maxLines = 4,
                     modifier = Modifier.padding(top = 10.dp),
                 )
             }
-            voice.error?.let {
+            error?.let {
                 Text(it, color = Color(0xFFFF8A80), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
             }
             Spacer(Modifier.weight(1f))
             if (showSettings) {
-                FilterChip(
-                    selected = fastModel,
-                    onClick = onToggleFast,
-                    label = { Text("Fast model for voice (quicker replies)", color = Color.White) },
-                )
-                VoiceSettings(voice)
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) { settings() }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = { showSettings = !showSettings }) { Text("Voice", color = Color.White) }
@@ -126,12 +116,15 @@ fun VoiceScreen(
     }
 }
 
+/** Settings for the phone's own voice. */
+@Composable
+fun PhoneVoiceSettings(voice: VoiceController) {
+    VoiceSettings(voice)
+}
+
 @Composable
 private fun VoiceSettings(voice: VoiceController) {
-    Column(
-        Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()).padding(bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("Deeper" to 0.8f, "Normal" to 1.0f, "Higher" to 1.2f).forEach { (n, p) ->
                 FilterChip(selected = voice.pitch == p, onClick = { voice.choosePitch(p) }, label = { Text(n, color = Color.White) })

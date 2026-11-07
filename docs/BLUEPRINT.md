@@ -21,7 +21,7 @@ Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
 
-## Status (v0.10, 7 Nov 2026)
+## Status (v0.11, 7 Nov 2026)
 
 Built and shipping from GitHub Releases (`releases/latest`):
 
@@ -32,7 +32,9 @@ Built and shipping from GitHub Releases (`releases/latest`):
 | Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
 | History | Chats saved on the phone (Chats screen); every Build Mode project saved with its full agent timeline (Projects screen) so you can resume it later; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `builder/BuildRunner.kt`, `ui/Markdown.kt` |
 | Images and videos in chat | Ask for pictures or videos: models use `<images>`/`<videos>` tools (DuckDuckGo Images with Wikimedia fallback; YouTube search), results show under the reply; tap an image for full screen, play videos inline; Markdown images and YouTube links render too | `llm/MediaSearch.kt`, `ui/MediaViews.kt` |
-| Attachments | Photos and PDFs sent natively to Claude, Gemini, ChatGPT and OpenRouter; text/CSV/code files to every model; big files trimmed to the most relevant parts; photos shrunk to 1600 px | `llm/AttachmentContent.kt`, `data/AttachmentStore.kt` |
+| Natural voice | Gemini Live native audio over WebSocket: expressive human-like speech (8 voices), talk over it to interrupt (server VAD + echo cancelling), Google Search, transcripts saved to the chat; phone voice is the fallback (with auto-retry for recognizer errors such as 11) | `ui/GeminiLive.kt` |
+| Attachments (all tabs) | Any type and size in Chat, Build and Create. Office files (docx/xlsx/pptx) and zips become text for every model; big files go to Gemini via its Files API (up to 2 GB, incl. audio/video); Build copies images/fonts/sounds into the app; Create edits a photo or animates it with Veo | `data/AttachmentStore.kt`, `llm/GeminiFiles.kt` |
+| Attachments (detail) | Photos and PDFs sent natively to Claude, Gemini, ChatGPT and OpenRouter; text/CSV/code files to every model; big files trimmed to the most relevant parts; photos shrunk to 1600 px | `llm/AttachmentContent.kt`, `data/AttachmentStore.kt` |
 | Voice | Full-screen live conversation with an animated orb; speaks each sentence as it's written; fast model + light thinking by default; never gets stuck (empty replies and errors go back to listening); on-device recognition with online fallback; tap the orb to interrupt; voice, pitch and speed | `ui/Voice.kt`, `ui/VoiceScreen.kt` |
 | Compile a project | Upload an Android Studio project .zip (Build screen, or attach it in chat and say "build"); unzips, creates a repo, builds with the project's own Gradle wrapper, AI fixes build errors; any model can also read the zip in chat | `builder/ZipImport.kt` |
 | Build Mode | Agent-style timeline, files and code viewer, follow-up changes on the same project, background service with notifications, stable signing key, library lookup and downloads, web lookups | `builder/` |

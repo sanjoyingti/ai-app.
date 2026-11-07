@@ -43,6 +43,22 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private var job: Job? = null
 
+    /** A photo to edit (images) or animate (video). */
+    var reference by mutableStateOf<com.aiapp.llm.Attachment?>(null)
+
+    fun attach(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val a = com.aiapp.data.AttachmentStore.import(app, uri)
+                if (!a.isImage) error = "Attach a photo (JPG, PNG or WebP) to edit or animate." else reference = a
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                error = e.message ?: "Couldn't attach that file."
+            }
+        }
+    }
+
     init {
         loadModels()
     }
@@ -97,9 +113,9 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
         job = viewModelScope.launch {
             try {
                 val bytes = if (isVideo) {
-                    MediaGen.video(model, key, prompt.trim(), aspect) { status = it }
+                    MediaGen.video(model, key, prompt.trim(), aspect, reference) { status = it }
                 } else {
-                    MediaGen.image(p, model, key, prompt.trim())
+                    MediaGen.image(p, model, key, prompt.trim(), reference)
                 }
                 status = "Saving to your gallery…"
                 resultUri = MediaGen.saveToGallery(app, bytes, isVideo)

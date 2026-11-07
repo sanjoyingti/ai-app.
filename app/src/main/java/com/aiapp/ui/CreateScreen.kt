@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -47,6 +48,9 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
     var prompt by rememberSaveable { mutableStateOf("") }
     var modelMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val pickPhoto = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let { vm.attach(it) } }
 
     Scaffold(
         topBar = {
@@ -87,6 +91,22 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
                         })
                     }
                 }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                OutlinedButton(onClick = { pickPhoto.launch(arrayOf("image/*")) }) {
+                    Text(if (vm.reference == null) "+ Add a photo" else "Change photo")
+                }
+                vm.reference?.let { ref ->
+                    val bmp = remember(ref.path) { BitmapFactory.decodeFile(ref.path, BitmapFactory.Options().apply { inSampleSize = 4 }) }
+                    bmp?.let { Image(it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(48.dp)) }
+                    TextButton(onClick = { vm.reference = null }) { Text("Remove") }
+                }
+            }
+            if (vm.reference != null) {
+                Text(
+                    if (vm.video) "The video will start from this photo." else "Describe how to change this photo.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             OutlinedTextField(
                 value = prompt,

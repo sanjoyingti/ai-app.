@@ -268,6 +268,23 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var unpacking by rememberSaveable { mutableStateOf(false) }
 
+    val attached = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateListOf<com.aiapp.llm.Attachment>() }
+    var attaching by rememberSaveable { mutableStateOf(false) }
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        attaching = true
+        scope.launch {
+            uris.forEach { u ->
+                try {
+                    attached += com.aiapp.data.AttachmentStore.import(context, u)
+                } catch (e: Exception) {
+                    problem = e.message ?: "Couldn't attach that file."
+                }
+            }
+            attaching = false
+        }
+    }
+
     fun ready(): String? = when {
         chat.githubToken().isBlank() -> "Sign in with GitHub in Settings first."
         else -> null
@@ -346,7 +363,27 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            if (attached.isNotEmpty() || attaching) {
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    attached.toList().forEach { a ->
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp)) {
+                                Text(a.name, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                                TextButton(onClick = { attached.remove(a) }) { Text("✕") }
+                            }
+                        }
+                    }
+                    if (attaching) Text("Attaching…", style = MaterialTheme.typography.labelMedium)
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { pickFiles.launch(arrayOf("*/*")) }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Attach files")
+                }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -356,8 +393,34 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                 )
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = {
+                    val zip = attached.firstOrNull { it.isZip }
+                    if (project == null && zip != null) {
+                        // An attached project zip: compile it.
+                        problem = ready()
+                        if (problem == null) {
+                            if (android.os.Build.VERSION.SDK_INT >= 33) notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            vm.newProject()
+                            vm.start(
+                                BuildRequest(
+                                    description = text.trim().ifBlank { "Compile ${zip.name} to an APK" },
+                                    appName = zip.name.removeSuffix(".zip"),
+                                    provider = chat.provider,
+                                    model = chat.model,
+                                    apiKey = chat.key(chat.provider),
+                                    effort = chat.effort,
+                                    githubToken = chat.githubToken(),
+                                    allowOtherSites = allowOther,
+                                    zipPath = zip.path,
+                                    zipName = zip.name,
+                                ),
+                            )
+                            attached.clear()
+                            text = ""
+                        }
+                        return@Button
+                    }
                     problem = when {
-                        text.isBlank() -> "Describe what you want."
+                        text.isBlank() && attached.isEmpty() -> "Describe what you want."
                         project == null && name.isBlank() -> "Give the app a name."
                         chat.githubToken().isBlank() -> "Sign in with GitHub in Settings first."
                         chat.provider.needsKey && chat.key(chat.provider).isBlank() -> "Add your ${chat.provider.label} key in Settings."
@@ -379,9 +442,11 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                                 githubToken = chat.githubToken(),
                                 allowOtherSites = allowOther,
                                 project = project,
+                                attachments = attached.toList(),
                             ),
                         )
                         text = ""
+                        attached.clear()
                     }
                 }) { Text(if (project == null) "Build" else "Send") }
             }

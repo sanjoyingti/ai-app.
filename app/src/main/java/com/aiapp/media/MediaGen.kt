@@ -84,9 +84,31 @@ object MediaGen {
         geminiModels(geminiKey).filter { "predictLongRunning" in it.third }
             .map { ModelInfo(it.first, it.second) }.sortedByDescending { it.id }
 
-    /** Returns the image bytes (PNG or JPEG). */
-    suspend fun image(provider: ProviderId, model: String, key: String, prompt: String): ByteArray = when (provider) {
-        ProviderId.OPENAI -> {
+    /** Returns the image bytes (PNG or JPEG). With [reference], edits or builds on that photo. */
+    suspend fun image(
+        provider: ProviderId,
+        model: String,
+        key: String,
+        prompt: String,
+        reference: com.aiapp.llm.Attachment? = null,
+    ): ByteArray = when (provider) {
+        ProviderId.OPENAI -> if (reference != null && reference.isImage) {
+            withContext(Dispatchers.IO) {
+                val file = File(reference.path)
+                val form = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                    .addFormDataPart("model", if (model.startsWith("dall-e")) "gpt-image-1" else model)
+                    .addFormDataPart("prompt", prompt)
+                    .addFormDataPart("image[]", file.name, file.asRequestBodyCompat(reference.mime))
+                    .build()
+                val req = Request.Builder().url("$OPENAI/images/edits").header("Authorization", "Bearer $key").post(form).build()
+                Http.client.newCall(req).execute().use { r ->
+                    val text = r.body?.string().orEmpty()
+                    if (!r.isSuccessful) throw ProviderException(r.code, Http.errorMessage(r.code, text))
+                    val first = (Http.json.parseToJsonElement(text).jsonObject["data"] as? JsonArray)?.firstOrNull() as? JsonObject
+                    first?.str("b64_json")?.let { Base64.getDecoder().decode(it) } ?: throw ProviderException(500, "No image returned.")
+                }
+            }
+        } else {
             val body = buildJsonObject {
                 put("model", model)
                 put("prompt", prompt)
@@ -101,7 +123,7 @@ object MediaGen {
                 ?: first.str("url")?.let { bytes(it, emptyMap()) }
                 ?: throw ProviderException(500, "No image returned.")
         }
-        ProviderId.GEMINI -> if (model.contains("imagen")) {
+        ProviderId.GEMINI -> if (model.contains("imagen") && reference == null) {
             val body = buildJsonObject {
                 putJsonArray("instances") { addJsonObject { put("prompt", prompt) } }
                 putJsonObject("parameters") { put("sampleCount", 1) }
@@ -113,13 +135,28 @@ object MediaGen {
         } else {
             val body = buildJsonObject {
                 putJsonArray("contents") {
-                    addJsonObject { putJsonArray("parts") { addJsonObject { put("text", prompt) } } }
+                    addJsonObject {
+                        putJsonArray("parts") {
+                            if (reference != null && reference.isImage) {
+                                addJsonObject {
+                                    putJsonObject("inlineData") {
+                                        put("mimeType", reference.mime)
+                                        put("data", Base64.getEncoder().encodeToString(File(reference.path).readBytes()))
+                                    }
+                                }
+                            }
+                            addJsonObject { put("text", prompt) }
+                        }
+                    }
                 }
                 putJsonObject("generationConfig") {
                     putJsonArray("responseModalities") { add(JsonPrimitive("TEXT")); add(JsonPrimitive("IMAGE")) }
                 }
             }.toString()
-            val r = post("$GEMINI/models/$model:generateContent", mapOf("x-goog-api-key" to key), body)
+            // Imagen can't take a photo, so use a Gemini image model for edits.
+            val m = if (model.contains("imagen")) imageModels(ProviderId.GEMINI, key).firstOrNull { !it.id.contains("imagen") }?.id
+                ?: throw ProviderException(400, "Your key has no Gemini model that can edit photos.") else model
+            val r = post("$GEMINI/models/$m:generateContent", mapOf("x-goog-api-key" to key), body)
             val parts = ((r["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject)
                 ?.let { (it["content"] as? JsonObject)?.get("parts") as? JsonArray }.orEmpty()
             parts.firstNotNullOfOrNull { p ->
@@ -132,10 +169,29 @@ object MediaGen {
     }
 
     /** Starts a video, polls until it's ready (a few minutes) and returns the MP4 bytes. */
-    suspend fun video(model: String, key: String, prompt: String, aspect: String, onStatus: (String) -> Unit): ByteArray {
+    suspend fun video(
+        model: String,
+        key: String,
+        prompt: String,
+        aspect: String,
+        reference: com.aiapp.llm.Attachment? = null,
+        onStatus: (String) -> Unit,
+    ): ByteArray {
         val headers = mapOf("x-goog-api-key" to key)
+        val startImage = reference?.takeIf { it.isImage }
         val body = buildJsonObject {
-            putJsonArray("instances") { addJsonObject { put("prompt", prompt) } }
+            putJsonArray("instances") {
+                addJsonObject {
+                    put("prompt", prompt)
+                    if (startImage != null) {
+                        // Animate this photo: it becomes the first frame.
+                        putJsonObject("image") {
+                            put("bytesBase64Encoded", Base64.getEncoder().encodeToString(File(startImage.path).readBytes()))
+                            put("mimeType", startImage.mime)
+                        }
+                    }
+                }
+            }
             putJsonObject("parameters") { put("aspectRatio", aspect) }
         }.toString()
         var op = try {
@@ -190,6 +246,18 @@ object MediaGen {
                 .apply { mkdirs() }
             val f = File(dir, name).apply { writeBytes(data) }
             Uri.fromFile(f)
+        }
+    }
+
+    private fun File.asRequestBodyCompat(mime: String): okhttp3.RequestBody {
+        val type = mime.toMediaType()
+        val f = this
+        return object : okhttp3.RequestBody() {
+            override fun contentType() = type
+            override fun contentLength() = f.length()
+            override fun writeTo(sink: okio.BufferedSink) {
+                f.inputStream().use { input -> sink.outputStream().let { input.copyTo(it) } }
+            }
         }
     }
 }

@@ -32,6 +32,8 @@ data class BuildRequest(
     /** An uploaded Android Studio project (.zip) to build instead of writing a new app. */
     val zipPath: String? = null,
     val zipName: String? = null,
+    /** Files attached to this request: shown to the model, and images/fonts/sounds added to the app. */
+    val attachments: List<com.aiapp.llm.Attachment> = emptyList(),
 )
 
 data class BuildResult(
@@ -100,7 +102,8 @@ class BuildAgent(
             notes = emptyList()
         } else if (existing == null) {
             step(BuildEvent.Kind.THINKING, "Planning and writing the app with ${req.provider.label}")
-            notes = apply(ask(firstPrompt()))
+            val assets = addAttachedAssets()
+            notes = apply(ask(firstPrompt() + assets, req.attachments))
             if (files.isEmpty()) {
                 return BuildResult(false, "The model didn't return any files. Try again or pick a stronger model.")
             }
@@ -114,7 +117,8 @@ class BuildAgent(
         } else {
             repo = GitHubClient.Repo(existing.owner, existing.repo, existing.branch, existing.repoUrl)
             step(BuildEvent.Kind.THINKING, "Working out the changes with ${req.provider.label}")
-            notes = apply(ask(changePrompt()))
+            val assets = addAttachedAssets()
+            notes = apply(ask(changePrompt() + assets, req.attachments))
             if (pendingFiles.isEmpty() && !depsChanged) {
                 return BuildResult(false, "The model didn't change any files. Try describing the change differently.", repo.url, existing.lastApkUrl)
             }
@@ -199,12 +203,48 @@ class BuildAgent(
      * Asks the model, letting it search the web or read pages before it writes files, and reports
      * each file as it starts streaming in.
      */
-    private suspend fun ask(prompt: String): String {
+    /** Adds attached images, fonts, sounds and other files to the project; returns notes for the prompt. */
+    private fun addAttachedAssets(): String {
+        val notes = mutableListOf<String>()
+        req.attachments.filter { it.text == null && !it.isZip }.forEach { a ->
+            val ext = a.name.substringAfterLast('.', "").lowercase()
+            val base = a.name.substringBeforeLast('.').lowercase().replace(Regex("[^a-z0-9_]+"), "_").trim('_')
+                .let { if (it.isEmpty() || !it.first().isLetter()) "file_$it" else it }.take(40)
+            val path = when {
+                ext in listOf("png", "jpg", "jpeg", "webp") || (a.isImage && a.mime == "image/jpeg") ->
+                    "app/src/main/res/drawable/$base.${if (ext == "jpeg" || (a.mime == "image/jpeg" && ext !in listOf("png", "webp"))) "jpg" else ext}"
+                ext in listOf("ttf", "otf") -> "app/src/main/res/font/$base.$ext"
+                ext in listOf("mp3", "ogg", "wav", "m4a", "aac", "mp4", "webm") -> "app/src/main/res/raw/$base.$ext"
+                else -> "app/src/main/assets/${a.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}"
+            }
+            val bytes = runCatching { java.io.File(a.path).readBytes() }.getOrNull() ?: return@forEach
+            if (bytes.size > MAX_DOWNLOAD) {
+                notes += "${a.name} is over 15 MB, so it wasn't added to the app."
+                return@forEach
+            }
+            pendingFiles[path] = bytes
+            val ref = when {
+                path.contains("/res/drawable/") -> "R.drawable.${path.substringAfterLast('/').substringBeforeLast('.')}"
+                path.contains("/res/font/") -> "R.font.${path.substringAfterLast('/').substringBeforeLast('.')}"
+                path.contains("/res/raw/") -> "R.raw.${path.substringAfterLast('/').substringBeforeLast('.')}"
+                else -> "assets/${path.substringAfterLast('/')}"
+            }
+            step(BuildEvent.Kind.DOWNLOAD, "Added your file ${a.name} as $ref")
+            notes += "The user's file ${a.name} is in the project as $ref; use it where it fits."
+        }
+        return if (notes.isEmpty()) "" else "
+
+Files from the user:
+" + notes.joinToString("
+") { "- $it" }
+    }
+
+    private suspend fun ask(prompt: String, attachments: List<com.aiapp.llm.Attachment> = emptyList()): String {
         val effort = if (req.effort == Effort.AUTO) Effort.HIGH else req.effort
         val system = (if (imported) ProjectTemplate.importedSystemPrompt else ProjectTemplate.systemPrompt(packageName)) +
             ProjectTemplate.webInstructions
         val cap = if (req.provider == ProviderId.OFFLINE) 3_000 else 8_000
-        val working = mutableListOf(ChatMessage(Role.USER, prompt))
+        val working = mutableListOf(ChatMessage(Role.USER, prompt, attachments))
         var steps = 0
         while (true) {
             val sb = StringBuilder()

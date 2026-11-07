@@ -102,6 +102,7 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
     }
 
     private var preferOffline = true
+    private var retries = 0
 
     /** Listens once; [onText] gets what you said (nothing if you stayed silent). */
     fun listen(onText: (String) -> Unit) {
@@ -126,6 +127,7 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
                 partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
             }
             override fun onResults(results: Bundle?) {
+                retries = 0
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 partial = ""
                 if (text.isBlank()) {
@@ -137,9 +139,17 @@ class VoiceController(context: Context) : TextToSpeech.OnInitListener {
             }
             override fun onError(code: Int) {
                 // On-device recognition not installed: switch to online recognition and try again.
-                if (preferOffline && code in listOf(12, 13, SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_CLIENT)) {
+                if (preferOffline && code in listOf(11, 12, 13, SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_CLIENT)) {
                     preferOffline = false
-                    main.post { listen(onText) }
+                    main.postDelayed({ listen(onText) }, 300)
+                    return
+                }
+                // Recognizer busy or its service disconnected (error 11): start a fresh one and try again.
+                if (code in listOf(SpeechRecognizer.ERROR_RECOGNIZER_BUSY, 11, SpeechRecognizer.ERROR_CLIENT) && retries < 3) {
+                    retries++
+                    recognizer?.destroy()
+                    recognizer = null
+                    main.postDelayed({ listen(onText) }, 400L * retries)
                     return
                 }
                 partial = ""

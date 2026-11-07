@@ -68,7 +68,14 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
     val voice = remember { VoiceController(context) }
     var voiceMode by rememberSaveable { mutableStateOf(false) }
     var spokenCount by rememberSaveable { mutableStateOf(-1) }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { voice.destroy() } }
+    var live by remember { mutableStateOf<GeminiLive?>(null) }
+    fun newLive() = GeminiLive(vm.geminiKey(), vm.liveVoice, vm.liveSystemPrompt()) { u, m -> vm.addVoiceTurn(u, m) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            voice.destroy()
+            live?.stop()
+        }
+    }
 
     val pickFiles = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
@@ -97,14 +104,18 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
         if (granted) {
             voiceMode = true
             spokenCount = vm.messages.size
-            vm.warmUp()
-            startListening()
+            if (vm.liveEnabled && vm.geminiKey().isNotBlank()) {
+                live = newLive().also { it.start() }
+            } else {
+                vm.warmUp()
+                startListening()
+            }
         }
     }
 
     // Voice mode: read each finished sentence aloud while the reply is still being written.
     LaunchedEffect(vm.streamingText, voiceMode) {
-        if (!voiceMode || !vm.streaming) return@LaunchedEffect
+        if (!voiceMode || live != null || !vm.streaming) return@LaunchedEffect
         val live = vm.streamingText
         if (listOf("<search", "<fetch", "<download", "<images", "<videos").any { live.contains(it, true) }) {
             if (!saidWait) {
@@ -125,12 +136,12 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
     // Problems (missing key, network…) show on the voice screen instead of leaving it stuck.
     LaunchedEffect(vm.error, voiceMode) {
         val e = vm.error
-        if (voiceMode && e != null) voice.showError(e)
+        if (voiceMode && live == null && e != null) voice.showError(e)
     }
 
     // When the reply is complete: speak whatever is left, then listen again.
     LaunchedEffect(vm.replyCount, voiceMode) {
-        if (!voiceMode || vm.streaming) return@LaunchedEffect
+        if (!voiceMode || live != null || vm.streaming) return@LaunchedEffect
         val last = vm.messages.lastOrNull()
         if (last == null || last.role != Role.ASSISTANT || vm.messages.size <= spokenCount) {
             // No new reply (empty answer or an error): don't hang, go back to listening.
@@ -158,29 +169,75 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
     }
 
     if (voiceMode) {
+        val session = live
         val lastReply = vm.messages.lastOrNull { it.role == Role.ASSISTANT }?.text.orEmpty()
-        VoiceScreen(
-            voice = voice,
-            thinking = vm.streaming,
-            caption = if (vm.streaming) VoiceController.plain(vm.streamingText).takeLast(220) else VoiceController.plain(lastReply).take(220),
-            modelLabel = vm.voiceModel().let { id -> "${vm.provider.label} · ${vm.models.firstOrNull { it.id == id }?.name ?: id}" },
-            fastModel = vm.voiceFastModel,
-            onToggleFast = vm::toggleVoiceFastModel,
-            onTalk = {
-                vm.stop()
-                startListening()
-            },
-            onExit = {
-                voiceMode = false
-                voice.stopListening()
-                voice.stopSpeaking()
-            },
-        )
-        androidx.activity.compose.BackHandler {
+        fun exitVoice() {
             voiceMode = false
+            live?.stop()
+            live = null
             voice.stopListening()
             voice.stopSpeaking()
         }
+        if (session != null) {
+            VoiceScreen(
+                state = session.state,
+                level = session.level,
+                liveLine = session.said.ifBlank { session.heard }.takeLast(220),
+                error = session.error,
+                modelLabel = "Natural voice · Gemini Live · ${GeminiLive.voices.firstOrNull { it.first == vm.liveVoice }?.let { "${it.first} (${it.second})" } ?: vm.liveVoice}",
+                onTalk = {
+                    when (session.state) {
+                        VoiceState.SPEAKING -> session.interrupt()
+                        VoiceState.IDLE -> session.start()
+                        else -> Unit
+                    }
+                },
+                onExit = { exitVoice() },
+                settings = {
+                    LiveSettings(vm, onChanged = {
+                        session.stop()
+                        live = if (vm.liveEnabled) newLive().also { it.start() } else null
+                        if (live == null) startListening()
+                    })
+                },
+            )
+        } else {
+            VoiceScreen(
+                state = when {
+                    voice.state == VoiceState.SPEAKING -> VoiceState.SPEAKING
+                    voice.state == VoiceState.LISTENING -> VoiceState.LISTENING
+                    vm.streaming || voice.state == VoiceState.THINKING -> VoiceState.THINKING
+                    else -> VoiceState.IDLE
+                },
+                level = voice.level,
+                liveLine = voice.partial.ifBlank {
+                    if (vm.streaming) VoiceController.plain(vm.streamingText).takeLast(220) else VoiceController.plain(lastReply).take(220)
+                },
+                error = voice.error,
+                modelLabel = "Phone voice · " + vm.voiceModel().let { id -> "${vm.provider.label} · ${vm.models.firstOrNull { it.id == id }?.name ?: id}" },
+                onTalk = {
+                    vm.stop()
+                    startListening()
+                },
+                onExit = { exitVoice() },
+                settings = {
+                    LiveSettings(vm, onChanged = {
+                        if (vm.liveEnabled && vm.geminiKey().isNotBlank()) {
+                            voice.stopListening()
+                            voice.stopSpeaking()
+                            live = newLive().also { it.start() }
+                        }
+                    })
+                    FilterChip(
+                        selected = vm.voiceFastModel,
+                        onClick = vm::toggleVoiceFastModel,
+                        label = { Text("Fast model for voice (quicker replies)", color = androidx.compose.ui.graphics.Color.White) },
+                    )
+                    PhoneVoiceSettings(voice)
+                },
+            )
+        }
+        androidx.activity.compose.BackHandler { exitVoice() }
         return
     }
 
@@ -458,6 +515,34 @@ private fun Composer(
                     else -> Button(onClick = onSend) { Text("Send") }
                 }
             }
+        }
+    }
+}
+
+/** Natural voice (Gemini Live) on/off and its voices. */
+@Composable
+private fun LiveSettings(vm: ChatViewModel, onChanged: () -> Unit) {
+    val white = androidx.compose.ui.graphics.Color.White
+    FilterChip(
+        selected = vm.liveEnabled,
+        onClick = {
+            vm.toggleLive()
+            onChanged()
+        },
+        label = { Text("Natural human-like voice (Gemini Live)", color = white) },
+    )
+    if (vm.geminiKey().isBlank()) {
+        Text("Add a free Gemini key in Settings to use the natural voice.", color = white.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
+    } else if (vm.liveEnabled) {
+        GeminiLive.voices.forEach { (name, desc) ->
+            FilterChip(
+                selected = vm.liveVoice == name,
+                onClick = {
+                    vm.chooseLiveVoice(name)
+                    onChanged()
+                },
+                label = { Text("$name · $desc", color = white) },
+            )
         }
     }
 }

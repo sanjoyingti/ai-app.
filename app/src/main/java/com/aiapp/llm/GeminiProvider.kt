@@ -1,6 +1,8 @@
 package com.aiapp.llm
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -58,7 +60,9 @@ class GeminiProvider : LlmProvider {
         messages: List<ChatMessage>,
         system: String,
         budget: Int?,
-    ): Flow<String> {
+    ): Flow<String> = flow {
+        // Big files (over ~15 MB) go through Gemini's upload API first.
+        val uploaded = AttachmentContent.geminiUploads(messages).associate { it.path to GeminiFiles.uri(apiKey, it) }
         val body = buildJsonObject {
             putJsonObject("systemInstruction") {
                 putJsonArray("parts") { addJsonObject { put("text", system) } }
@@ -68,7 +72,7 @@ class GeminiProvider : LlmProvider {
                 messages.forEachIndexed { i, m ->
                     addJsonObject {
                         put("role", if (m.role == Role.USER) "user" else "model")
-                        put("parts", AttachmentContent.geminiParts(m, i in withFiles))
+                        put("parts", AttachmentContent.geminiParts(m, i in withFiles, uploaded))
                     }
                 }
             }
@@ -80,7 +84,7 @@ class GeminiProvider : LlmProvider {
         }.toString()
 
         val url = "$base/models/$model:streamGenerateContent?alt=sse"
-        return Http.sse(url, headers(apiKey), body).mapNotNull { data -> parse(data) }
+        emitAll(Http.sse(url, headers(apiKey), body).mapNotNull { data -> parse(data) })
     }
 
     private fun parse(data: String): String? {

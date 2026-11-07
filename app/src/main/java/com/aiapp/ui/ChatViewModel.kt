@@ -397,6 +397,52 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         openBuild = true
     }
 
+    // ---- Natural voice (Gemini Live) ----
+
+    /** Use Gemini Live's human-like voice when a Gemini key is set (on by default). */
+    var liveEnabled by mutableStateOf(prefs.getBoolean("live", true))
+        private set
+    var liveVoice by mutableStateOf(prefs.getString("live_voice", "Puck") ?: "Puck")
+        private set
+
+    fun toggleLive() {
+        liveEnabled = !liveEnabled
+        prefs.edit().putBoolean("live", liveEnabled).apply()
+    }
+
+    fun chooseLiveVoice(name: String) {
+        liveVoice = name
+        prefs.edit().putString("live_voice", name).apply()
+    }
+
+    fun geminiKey(): String = keys.get(ProviderId.GEMINI)
+
+    /** Instructions for Gemini Live, including the recent conversation so it can pick up where you left off. */
+    fun liveSystemPrompt(): String = buildString {
+        append(
+            "You are a warm, witty, quick-thinking voice assistant, like a smart friend on a phone call. " +
+                "Speak naturally and expressively: vary your tone, react with genuine emotion, and laugh when " +
+                "something is funny. Keep answers short and conversational unless asked for detail; never read " +
+                "out lists, links or code. Answer in the language the user speaks. Use Google Search for anything current.",
+        )
+        val recent = messages.takeLast(12).filter { it.text.isNotBlank() }
+        if (recent.isNotEmpty()) {
+            append("\n\nThe conversation so far (continue from here):\n")
+            recent.forEach { m ->
+                append(if (m.role == Role.USER) "User: " else "You: ")
+                append(m.text.take(600).replace("\n", " "))
+                append("\n")
+            }
+        }
+    }
+
+    /** Saves a spoken exchange to the chat. */
+    fun addVoiceTurn(userSaid: String, assistantSaid: String) {
+        if (userSaid.isNotBlank()) messages += ChatMessage(Role.USER, userSaid)
+        if (assistantSaid.isNotBlank()) messages += ChatMessage(Role.ASSISTANT, assistantSaid)
+        persist()
+    }
+
     /** Use the provider's fastest smart model for voice (on by default). */
     var voiceFastModel by mutableStateOf(prefs.getBoolean("voice_fast", true))
         private set
