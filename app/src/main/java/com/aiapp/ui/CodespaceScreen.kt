@@ -35,6 +35,30 @@ import androidx.compose.ui.viewinterop.AndroidView
 /** Which Codespace (if any) is open inside the app. */
 object CodespaceState {
     var url by mutableStateOf<String?>(null)
+    /** "owner/repo" of the open project, so its codespace can be remembered. */
+    var repo by mutableStateOf<String?>(null)
+
+    private fun prefs(context: android.content.Context) =
+        context.getSharedPreferences("codespaces", android.content.Context.MODE_PRIVATE)
+
+    /** Opens the project's codespace directly if we've been there before; otherwise the picker (once). */
+    fun open(context: android.content.Context, repoUrl: String) {
+        val path = repoUrl.removePrefix("https://github.com/").trimEnd('/')
+        repo = path
+        url = prefs(context).getString(path, null) ?: chooserUrl(path)
+    }
+
+    fun chooserUrl(path: String) = "https://codespaces.new/$path?quickstart=1"
+
+    fun remember(context: android.content.Context, codespaceUrl: String) {
+        val r = repo ?: return
+        prefs(context).edit().putString(r, codespaceUrl).apply()
+    }
+
+    fun forget(context: android.content.Context) {
+        val r = repo ?: return
+        prefs(context).edit().remove(r).apply()
+    }
 }
 
 /**
@@ -48,6 +72,7 @@ fun CodespaceScreen(url: String, onClose: () -> Unit) {
     var web by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableStateOf(0) }
     var title by remember { mutableStateOf("Codespace") }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     BackHandler {
         val w = web
@@ -59,7 +84,14 @@ fun CodespaceScreen(url: String, onClose: () -> Unit) {
             TopAppBar(
                 title = { Text(title, maxLines = 1) },
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close") } },
-                actions = { TextButton(onClick = { web?.reload() }) { Text("Reload") } },
+                actions = {
+                    TextButton(onClick = { web?.reload() }) { Text("Reload") }
+                    // If the saved codespace was deleted, pick or create another.
+                    TextButton(onClick = {
+                        CodespaceState.forget(context)
+                        CodespaceState.repo?.let { web?.loadUrl(CodespaceState.chooserUrl(it)) }
+                    }) { Text("Switch") }
+                },
             )
         },
     ) { padding ->
@@ -82,6 +114,12 @@ fun CodespaceScreen(url: String, onClose: () -> Unit) {
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         webViewClient = object : WebViewClient() {
+                            // Once VS Code opens (https://<name>.github.dev), remember it: next time it opens directly.
+                            override fun doUpdateVisitedHistory(view: WebView, u: String?, isReload: Boolean) {
+                                val host = u?.let { android.net.Uri.parse(it).host }.orEmpty()
+                                if (host.endsWith(".github.dev") && host != "github.dev") CodespaceState.remember(context, u!!)
+                            }
+
                             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                                 val scheme = request.url.scheme.orEmpty()
                                 return scheme != "http" && scheme != "https" // keep web links inside; ignore app links

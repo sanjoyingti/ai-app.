@@ -292,7 +292,7 @@ private fun ResultCard(r: TimelineItem.Result, onRetry: (() -> Unit)? = null) {
             }
             r.repoUrl?.let { url ->
                 val ctx = androidx.compose.ui.platform.LocalContext.current
-                OutlinedButton(onClick = { CodespaceState.url = codespaceUrl(url) }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { CodespaceState.open(ctx, url) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Open in Codespace (edit the code in VS Code)")
                 }
             }
@@ -686,7 +686,7 @@ private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
                     }
                     p.project?.repoUrl?.takeIf { it.isNotBlank() }?.let { url ->
                         val ctx = androidx.compose.ui.platform.LocalContext.current
-                        TextButton(onClick = { CodespaceState.url = codespaceUrl(url) }) { Text("Codespace") }
+                        TextButton(onClick = { CodespaceState.open(ctx, url) }) { Text("Codespace") }
                     }
                     if (!(current && vm.running)) {
                         TextButton(onClick = {
