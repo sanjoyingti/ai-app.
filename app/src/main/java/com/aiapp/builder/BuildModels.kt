@@ -42,4 +42,10 @@ data class Project(
     val zipName: String? = null,
     /** True once the project's files have reached GitHub at least once. */
     val uploaded: Boolean = false,
+    /** Checkpoint: the last commit sent to GitHub (its build can be checked again on Retry). */
+    val lastSha: String? = null,
+    /** Checkpoint: files changed by the model but not yet uploaded. */
+    val pendingPaths: List<String> = emptyList(),
+    /** Checkpoint: which fix round the build had reached. */
+    val round: Int = 0,
 )

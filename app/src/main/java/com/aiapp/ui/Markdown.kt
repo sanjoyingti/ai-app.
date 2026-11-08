@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.sp
 /** Renders the Markdown that models usually write: headings, lists, quotes, code blocks and inline styles. */
 @Composable
 fun MarkdownText(text: String, modifier: Modifier = Modifier) {
-    val blocks = splitCode(text)
+    val blocks = androidx.compose.runtime.remember(text) { splitCode(text) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEach { b ->
             if (b.isCode) CodeBlock(b.lang, b.text) else Prose(b.text)

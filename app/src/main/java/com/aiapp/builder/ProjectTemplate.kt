@@ -139,6 +139,12 @@ object ProjectTemplate {
                     run: |
                       set -o pipefail
                       gradle assembleDebug --stacktrace 2>&1 | tee build.log
+                  - name: Report errors
+                    if: failure()
+                    run: |
+                      grep -E "^e: |error:|What went wrong|Could not resolve|FAILURE" -A2 build.log | head -60 | while IFS= read -r l; do
+                        echo "::error::${'$'}{l//%/%25}"
+                      done
                   - name: Rename APK
                     run: cp app/build/outputs/apk/debug/app-debug.apk app-${'$'}{{ github.run_number }}.apk
                   - uses: softprops/action-gh-release@v2
@@ -202,6 +208,12 @@ object ProjectTemplate {
                   else
                     gradle assembleDebug --stacktrace 2>&1 | tee build.log
                   fi
+              - name: Report errors
+                if: failure()
+                run: |
+                  grep -E "^e: |error:|What went wrong|Could not resolve|FAILURE" -A2 build.log | head -60 | while IFS= read -r l; do
+                    echo "::error::${'$'}{l//%/%25}"
+                  done
               - name: Collect APK
                 run: |
                   APK=${'$'}(find . -path "*/build/outputs/apk/*" -name "*.apk" | head -n 1)

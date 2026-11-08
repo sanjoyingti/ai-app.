@@ -34,6 +34,8 @@ data class BuildRequest(
     val zipName: String? = null,
     /** Files attached to this request: shown to the model, and images/fonts/sounds added to the app. */
     val attachments: List<com.aiapp.llm.Attachment> = emptyList(),
+    /** Pick up where the last build of [project] stopped instead of starting over. */
+    val resume: Boolean = false,
 )
 
 data class BuildResult(
@@ -64,6 +66,8 @@ class BuildAgent(
     private val workflowFile = if (imported) ProjectTemplate.IMPORT_WORKFLOW_FILE else "build.yml"
     private var importedName: String? = null
     private var uploadedOnce = false
+    private var currentSha: String? = req.project?.lastSha
+    private var currentRound = 0
 
     private val files = linkedMapOf<String, String>().apply { req.project?.files?.let { putAll(it) } }
     private val deps = linkedSetOf<String>().apply { req.project?.deps?.let { addAll(it) } }
@@ -93,7 +97,29 @@ class BuildAgent(
         val neverUploaded = existing != null && existing.imported && !existing.uploaded && existing.lastApkUrl == null
         val resumeZip = existing?.takeIf { neverUploaded }?.zipPath?.takeIf { java.io.File(it).exists() }
         val zipToRead = req.zipPath ?: resumeZip
-        if ((existing == null && req.zipPath != null) || resumeZip != null) {
+        var checkSha: String? = null
+        var startRound = 0
+        if (req.resume && existing != null && resumeZip == null) {
+            // Retry: continue from the saved checkpoint instead of starting over.
+            repo = GitHubClient.Repo(existing.owner, existing.repo, existing.branch, existing.repoUrl)
+            notes = emptyList()
+            startRound = existing.round
+            val restored = existing.pendingPaths.mapNotNull { p ->
+                val text = files[p] ?: (if (!imported) ProjectTemplate.files(appName, packageName, deps.toList())[p] else null)
+                text?.let { p to it.toByteArray() }
+            }
+            when {
+                restored.isNotEmpty() -> {
+                    restored.forEach { (p, b) -> pendingFiles[p] = b }
+                    step(BuildEvent.Kind.STEP, "Resuming: uploading ${restored.size} file(s) that didn't reach GitHub last time")
+                }
+                existing.lastSha != null -> {
+                    checkSha = existing.lastSha
+                    step(BuildEvent.Kind.STEP, "Resuming: checking the last build on GitHub (no code is rewritten)")
+                }
+                else -> step(BuildEvent.Kind.STEP, "Resuming: starting a fresh build of the current code")
+            }
+        } else if ((existing == null && req.zipPath != null) || resumeZip != null) {
             val zipLabel = req.zipName ?: existing?.zipName ?: "the project"
             if (resumeZip != null) step(BuildEvent.Kind.STEP, "The first upload didn't finish — uploading the whole project again")
             step(BuildEvent.Kind.STEP, "Unpacking $zipLabel")
@@ -145,8 +171,16 @@ class BuildAgent(
         }
         saveProject(repo, null)
 
-        var round = 0
+        var round = startRound
         while (true) {
+          currentRound = round
+          val sha: String
+          val resumeSha = checkSha
+          if (resumeSha != null) {
+            // Already on GitHub: just look at (or wait for) that build.
+            checkSha = null
+            sha = resumeSha
+          } else {
             if (depsChanged) {
                 pendingFiles["app/build.gradle.kts"] =
                     ProjectTemplate.files(appName, packageName, deps.toList()).getValue("app/build.gradle.kts").toByteArray()
@@ -170,7 +204,7 @@ class BuildAgent(
             }
             val total = pendingFiles.size + pendingDisk.size
             var lastPct = -1
-            val sha = gh.commit(repo, pendingFiles.toMap(), message, pendingDisk.toMap()) { n, of, sent, size ->
+            sha = gh.commit(repo, pendingFiles.toMap(), message, pendingDisk.toMap()) { n, of, sent, size ->
                 val pct = if (size > 0) (sent * 100 / size).toInt() else n * 100 / of.coerceAtLeast(1)
                 if (pct != lastPct) {
                     lastPct = pct
@@ -183,7 +217,9 @@ class BuildAgent(
             pendingDisk.values.forEach { it.delete() }
             pendingDisk.clear()
             uploadedOnce = true
+            currentSha = sha
             saveProject(repo, null)
+          }
 
             step(BuildEvent.Kind.BUILD, "Building the APK on GitHub (usually 3–5 minutes)")
             val run = waitForRun(repo, sha)
@@ -231,10 +267,13 @@ class BuildAgent(
                 return BuildResult(false, "The build still fails after $round fix rounds. Try a higher Brain level or a stronger model.", repo.url)
             }
             round++
+            currentRound = round
+            step(BuildEvent.Kind.STEP, "Reading the build errors")
             val errors = gh.failureSummary(repo, run.id)
             val count = errors.lines().count { it.startsWith("e: ") || it.contains("error:", true) }.coerceAtLeast(1)
             step(BuildEvent.Kind.ERROR, "Build failed with $count error${if (count == 1) "" else "s"}. Fixing (round $round of $maxFixRounds)")
             notes = apply(ask(fixPrompt(errors, notes)))
+            saveProject(repo, null)
         }
     }
 
@@ -257,6 +296,9 @@ class BuildAgent(
                 zipPath = req.zipPath ?: req.project?.zipPath,
                 zipName = req.zipName ?: req.project?.zipName,
                 uploaded = uploadedOnce || req.project?.uploaded == true,
+                lastSha = currentSha,
+                pendingPaths = pendingFiles.keys.toList(),
+                round = currentRound,
             ),
         )
     }

@@ -126,6 +126,9 @@ object Providers {
 
     val offline: OfflineProvider get() = offlineProvider
 
+    /** The offline provider if it was ever created (for freeing memory without creating it). */
+    val offlineIfLoaded: OfflineProvider? get() = if (::offlineProvider.isInitialized) offlineProvider else null
+
     fun get(id: ProviderId): LlmProvider = if (id == ProviderId.OFFLINE) offlineProvider else all.getValue(id)
 
     /** Live model list for [id], most advanced first. Offline models keep their catalog order. */

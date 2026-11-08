@@ -88,6 +88,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     var streamingText by mutableStateOf("")
 
+    private val textBuf = StringBuilder()
+    private val thinkBuf = StringBuilder()
+    private var lastFlush = 0L
+
+    private fun flushStream() {
+        if (textBuf.isNotEmpty()) {
+            streamingText += textBuf
+            textBuf.clear()
+        }
+        if (thinkBuf.isNotEmpty()) {
+            thinkingText += thinkBuf
+            thinkBuf.clear()
+        }
+    }
+
     /** The model's reasoning for the reply being written (live). */
     var thinkingText by mutableStateOf("")
         private set
@@ -555,16 +570,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         if (delta.startsWith(com.aiapp.llm.THOUGHT)) {
                             // The model's reasoning, shown live in the Thinking box.
                             if (thinkingStart == 0L) thinkingStart = System.currentTimeMillis()
-                            thinkingText += delta.substring(1)
+                            thinkBuf.append(delta, 1, delta.length)
                             if (status != "Thinking…") status = "Thinking…"
                         } else {
                             if (thinkingStart > 0L && thoughtSeconds == 0) {
                                 thoughtSeconds = ((System.currentTimeMillis() - thinkingStart) / 1000).toInt().coerceAtLeast(1)
                             }
                             if (status != "Writing…") status = "Writing…"
-                            streamingText += delta
+                            textBuf.append(delta)
+                        }
+                        // Redraw at most ~12 times a second instead of on every word: much smoother.
+                        val now = System.currentTimeMillis()
+                        if (now - lastFlush > 80) {
+                            lastFlush = now
+                            flushStream()
                         }
                     }
+                    flushStream()
                     if (!web || steps >= (if (voice) 1 else MAX_WEB_STEPS)) break
                     // (Offline models get the same number of lookups; they're cheap.)
                     val reply = streamingText
@@ -639,6 +661,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val foundMedia = mutableListOf<com.aiapp.llm.MediaItem>()
 
     private fun finishStream() {
+        flushStream()
         val stripped = streamingText.replace(WebTools.searchTag, "").replace(WebTools.fetchTag, "")
             .replace(WebTools.downloadTag, "").replace(WebTools.imagesTag, "").replace(WebTools.videosTag, "").trim()
         if (stripped.isNotBlank() || foundMedia.isNotEmpty()) {

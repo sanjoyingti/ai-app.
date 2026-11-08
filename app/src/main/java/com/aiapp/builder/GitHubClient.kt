@@ -32,7 +32,23 @@ class GitHubClient(private val token: String) {
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
 
+    /** Retries a request through brief network drops (2 s, 5 s, 10 s, 20 s). */
+    private suspend fun <T> retrying(block: suspend () -> T): T {
+        val waits = listOf(2_000L, 5_000L, 10_000L, 20_000L)
+        for (w in waits) {
+            try {
+                return block()
+            } catch (e: java.io.IOException) {
+                kotlinx.coroutines.delay(w)
+            }
+        }
+        return block()
+    }
+
     private suspend fun call(method: String, path: String, body: JsonElement? = null): JsonElement =
+        retrying { callOnce(method, path, body) }
+
+    private suspend fun callOnce(method: String, path: String, body: JsonElement? = null): JsonElement =
         withContext(Dispatchers.IO) {
             val rb = body?.toString()?.toRequestBody(jsonType)
             val req = request("$api$path").method(method, rb).build()
@@ -174,7 +190,7 @@ class GitHubClient(private val token: String) {
             }
         }
         val req = request("$api$base/git/blobs").post(body).build()
-        Http.client.newCall(req).execute().use { r ->
+        retrying { withContext(Dispatchers.IO) { Http.client.newCall(req).execute() } }.use { r ->
             val text = r.body?.string().orEmpty()
             if (!r.isSuccessful) throw ProviderException(r.code, "GitHub: couldn't upload ${file.name} (HTTP ${r.code})")
             (Http.json.parseToJsonElement(text).jsonObject["sha"] as? JsonPrimitive)?.contentOrNull
@@ -201,20 +217,40 @@ class GitHubClient(private val token: String) {
     }
 
     /** Downloads the run's logs and keeps only the lines that explain a failure. */
-    suspend fun failureSummary(repo: Repo, runId: Long): String = withContext(Dispatchers.IO) {
-        val req = request("$api/repos/${repo.owner}/${repo.name}/actions/runs/$runId/logs").get().build()
-        val lines = mutableListOf<String>()
-        Http.client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@withContext "Build failed (logs unavailable, HTTP ${resp.code})."
-            ZipInputStream(resp.body!!.byteStream()).use { zip ->
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    if (entry.isDirectory) continue
-                    zip.bufferedReader().readLines().forEach { lines += it }
+    /**
+     * Why a build failed: the error lines from the run's logs. If the logs can't be downloaded, falls
+     * back to the run's error annotations (the workflow reports compile errors there too).
+     */
+    suspend fun failureSummary(repo: Repo, runId: Long): String {
+        val fromLogs = runCatching {
+            retrying {
+                withContext(Dispatchers.IO) {
+                    val req = request("$api/repos/${repo.owner}/${repo.name}/actions/runs/$runId/logs").get().build()
+                    val lines = mutableListOf<String>()
+                    Http.client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withContext null
+                        ZipInputStream(resp.body!!.byteStream()).use { zip ->
+                            while (true) {
+                                val entry = zip.nextEntry ?: break
+                                if (entry.isDirectory) continue
+                                zip.bufferedReader().readLines().forEach { lines += it }
+                            }
+                        }
+                    }
+                    extractErrors(lines)
                 }
             }
-        }
-        extractErrors(lines)
+        }.getOrNull()
+        if (!fromLogs.isNullOrBlank()) return fromLogs
+        val notes = runCatching {
+            val jobs = (call("GET", "/repos/${repo.owner}/${repo.name}/actions/runs/$runId/jobs") as? JsonObject)?.get("jobs") as? JsonArray
+            jobs.orEmpty().flatMap { j ->
+                val id = ((j as? JsonObject)?.get("id") as? JsonPrimitive)?.longOrNull ?: return@flatMap emptyList()
+                val ann = call("GET", "/repos/${repo.owner}/${repo.name}/check-runs/$id/annotations") as? JsonArray
+                ann.orEmpty().mapNotNull { ((it as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull }
+            }.filter { !it.contains("Node.js") && !it.contains("deprecated") && !it.contains("ubuntu-latest") }
+        }.getOrNull().orEmpty()
+        return notes.joinToString("\n").ifBlank { "The build failed, but its error details couldn't be read." }.take(6000)
     }
 
     suspend fun latestApkUrl(repo: Repo): String? {

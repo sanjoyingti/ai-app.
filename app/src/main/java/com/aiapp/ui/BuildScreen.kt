@@ -75,6 +75,27 @@ import com.aiapp.builder.BuildRunner
 import androidx.compose.runtime.remember
 import com.aiapp.llm.ProviderId
 
+private val resumeWords = Regex("^\\s*(retry|resume|continue|try again|go on|carry on|build now|rebuild)\\b", RegexOption.IGNORE_CASE)
+
+/** Starts a build that continues the open project from its last checkpoint. */
+private fun resumeBuild(chat: ChatViewModel, vm: BuildViewModel, text: String = "Retry") {
+    val project = vm.project ?: return
+    vm.start(
+        BuildRequest(
+            description = text,
+            appName = project.appName,
+            provider = chat.provider,
+            model = chat.model,
+            apiKey = chat.key(chat.provider),
+            effort = chat.effort,
+            githubToken = chat.githubToken(),
+            allowOtherSites = false,
+            project = project,
+            resume = true,
+        ),
+    )
+}
+
 /** Build Mode, laid out like an IDE agent chat: your requests, live steps, files and results. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,7 +177,12 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
                                 Column(Modifier.padding(start = 30.dp)) { UploadBar(BuildRunner.progressText.ifBlank { "Working…" }, prog) }
                             }
                         }
-                        is TimelineItem.Result -> ResultCard(item)
+                        is TimelineItem.Result -> ResultCard(
+                            item,
+                            onRetry = if (!item.success && isLast && !vm.running && vm.project != null) {
+                                { resumeBuild(chat, vm) }
+                            } else null,
+                        )
                     }
                 }
             }
@@ -238,7 +264,7 @@ private fun EventRow(e: BuildEvent, active: Boolean) {
 }
 
 @Composable
-private fun ResultCard(r: TimelineItem.Result) {
+private fun ResultCard(r: TimelineItem.Result, onRetry: (() -> Unit)? = null) {
     val uri = LocalUriHandler.current
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -248,6 +274,9 @@ private fun ResultCard(r: TimelineItem.Result) {
                 color = if (r.success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
             r.apkUrl?.let { url -> ApkDownload(url) }
+            if (onRetry != null) {
+                Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry from where it stopped") }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 r.apkUrl?.let { url -> TextButton(onClick = { uri.openUri(url) }) { Text("Open in browser") } }
                 r.apkUrl?.let { url ->
@@ -437,6 +466,14 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                                 ),
                             )
                             attached.clear()
+                            text = ""
+                        }
+                        return@Button
+                    }
+                    if (project != null && attached.isEmpty() && resumeWords.containsMatchIn(text)) {
+                        problem = ready()
+                        if (problem == null) {
+                            resumeBuild(chat, vm, text.trim())
                             text = ""
                         }
                         return@Button

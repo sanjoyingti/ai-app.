@@ -20,6 +20,15 @@ import com.aiapp.ui.HistoryScreen
 import com.aiapp.ui.SettingsScreen
 
 class MainActivity : ComponentActivity() {
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // App hidden or memory low: drop the offline model and image cache (they reload when needed).
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            com.aiapp.ui.ImageLoader.clear()
+            if (!com.aiapp.builder.BuildRunner.running) com.aiapp.llm.Providers.offlineIfLoaded?.release()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {

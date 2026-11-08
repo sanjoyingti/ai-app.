@@ -26,6 +26,7 @@ import java.io.IOException
 class BuildService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var job: Job? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -39,6 +40,10 @@ class BuildService : Service() {
         BuildRunner.pending = null
         createChannel()
         startInForeground(progressNotification("Starting…"))
+        // Keep the CPU and network awake while building, even with the screen off.
+        wakeLock = (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "AIApp:build")
+            .apply { acquire(60 * 60 * 1000L) }
 
         BuildRunner.running = true
         job = scope.launch {
@@ -74,7 +79,8 @@ class BuildService : Service() {
             BuildRunner.timeline += TimelineItem.Result(result.success, result.message, result.apkUrl, result.repoUrl)
             BuildRunner.running = false
             BuildRunner.progress = null
-            BuildRunner.save(this@BuildService)
+            BuildRunner.saveNow(this@BuildService)
+            runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
             stopForeground(STOP_FOREGROUND_REMOVE)
             notify(DONE_ID, doneNotification(request.project?.appName ?: request.appName, result))
             stopSelf()
@@ -83,6 +89,7 @@ class BuildService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         scope.cancel()
         BuildRunner.running = false
         super.onDestroy()

@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -222,6 +223,31 @@ class OfflineProvider(context: Context) : LlmProvider {
         File(dir, "${model.id}.part").delete()
     }
 
+    @Volatile private var lastUsed = 0L
+    private val idleScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+    private var idleJob: kotlinx.coroutines.Job? = null
+
+    /** Unloads the model after 3 idle minutes, so it doesn't keep gigabytes of RAM busy. */
+    private fun scheduleIdleRelease() {
+        lastUsed = System.currentTimeMillis()
+        idleJob?.cancel()
+        idleJob = idleScope.launch {
+            kotlinx.coroutines.delay(3 * 60_000L)
+            release()
+        }
+    }
+
+    /** Frees the loaded model now (unless it's busy answering). Loads again on next use. */
+    fun release() {
+        if (engineLock.tryLock()) {
+            try {
+                closeEngine()
+            } finally {
+                engineLock.unlock()
+            }
+        }
+    }
+
     private fun closeEngine() {
         runCatching { engine?.close() }
         engine = null
@@ -297,6 +323,7 @@ class OfflineProvider(context: Context) : LlmProvider {
                 systemInstruction = Contents.of(system + effortHint(effort)),
                 initialMessages = history,
             )
+            scheduleIdleRelease()
             eng.createConversation(config).use { conversation ->
                 conversation.sendMessageAsync(AttachmentContent.text(last, AttachmentContent.Target.TEXT_ONLY, false))
                     .collect { emit(it.toString()) }

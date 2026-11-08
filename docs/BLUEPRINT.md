@@ -21,7 +21,7 @@ Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
 
-## Status (v0.13, 8 Nov 2026)
+## Status (v0.14, 8 Nov 2026)
 
 Built and shipping from GitHub Releases (`releases/latest`):
 
@@ -32,6 +32,8 @@ Built and shipping from GitHub Releases (`releases/latest`):
 | Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
 | History | Chats saved on the phone (Chats screen); every Build Mode project saved with its full agent timeline (Projects screen) so you can resume it later; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `builder/BuildRunner.kt`, `ui/Markdown.kt` |
 | Images and videos in chat | Ask for pictures or videos: models use `<images>`/`<videos>` tools (DuckDuckGo Images with Wikimedia fallback; YouTube search), results show under the reply; tap an image for full screen, play videos inline; Markdown images and YouTube links render too | `llm/MediaSearch.kt`, `ui/MediaViews.kt` |
+| Reliability | Every GitHub call retries through network drops; build errors read from logs or, as a fallback, the workflow's error annotations; a wake lock keeps builds running with the screen off; checkpoints (last commit, files not yet uploaded, fix round) let "retry"/"continue" or the Retry button resume exactly where a build stopped | `builder/` |
+| Performance | Streaming redraws batched (~12/s); Markdown parsed once per text; Build Mode saves batched off the main thread; offline model unloaded after 3 idle minutes or when the app is hidden; smaller image cache | |
 | Live thinking | Claude (adaptive thinking, summarized), Gemini (includeThoughts) and OpenRouter models (reasoning) stream their reasoning; shown live in a Thinking box, then folded to "Thought for N s"; Build Mode shows it under the current step. Brain level = Effort chip | `ChatViewModel`, `ui/ChatScreen.kt` |
 | Natural voice | Gemini Live native audio over WebSocket: expressive human-like speech (8 voices), talk over it to interrupt (server VAD + echo cancelling), Google Search, transcripts saved to the chat; phone voice is the fallback (with auto-retry for recognizer errors such as 11) | `ui/GeminiLive.kt` |
 | Attachments (all tabs) | Any type and size in Chat, Build and Create. Office files (docx/xlsx/pptx) and zips become text for every model; big files go to Gemini via its Files API (up to 2 GB, incl. audio/video); Build copies images/fonts/sounds into the app; Create edits a photo or animates it with Veo | `data/AttachmentStore.kt`, `llm/GeminiFiles.kt` |

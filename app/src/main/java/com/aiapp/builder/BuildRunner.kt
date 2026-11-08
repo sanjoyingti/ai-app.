@@ -10,6 +10,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 /** A saved Build Mode project: the app, its whole agent conversation, and when it was last used. */
 @Serializable
@@ -77,12 +78,42 @@ object BuildRunner {
         prefs(context).getString("current", null)?.let { open(context, it) }
     }
 
+    private val io = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    private var pendingSave: kotlinx.coroutines.Job? = null
+
+    /** Saves soon (batched, off the main thread) so frequent progress updates don't make the app stutter. */
     fun save(context: Context) {
-        if (timeline.isEmpty() && project == null) return
+        if (pendingSave?.isActive == true) return
+        val app = context.applicationContext
+        pendingSave = io.launch {
+            kotlinx.coroutines.delay(1_500)
+            writeNow(app)
+        }
+    }
+
+    /** Saves right away (end of a build). */
+    fun saveNow(context: Context) {
+        pendingSave?.cancel()
+        val app = context.applicationContext
+        val snapshot = SavedProject(projectId, System.currentTimeMillis(), project, timeline.toList())
+        io.launch { write(app, snapshot) }
+    }
+
+    private suspend fun writeNow(context: Context) {
+        val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            SavedProject(projectId, System.currentTimeMillis(), project, timeline.toList())
+        }
+        write(context, snapshot)
+    }
+
+    private fun write(context: Context, s: SavedProject) {
+        if (s.timeline.isEmpty() && s.project == null) return
         runCatching {
-            File(dir(context), "$projectId.json")
-                .writeText(json.encodeToString(SavedProject(projectId, System.currentTimeMillis(), project, timeline.toList())))
-            prefs(context).edit().putString("current", projectId).apply()
+            val f = File(dir(context), "${s.id}.json")
+            val tmp = File(dir(context), "${s.id}.tmp")
+            tmp.writeText(json.encodeToString(s))
+            tmp.renameTo(f)
+            prefs(context).edit().putString("current", s.id).apply()
         }
     }
 
@@ -113,7 +144,7 @@ object BuildRunner {
     /** Starts a fresh project; the current one stays saved in Projects (and its repo stays on GitHub). */
     fun newProject(context: Context) {
         if (running) return
-        save(context)
+        saveNow(context)
         projectId = UUID.randomUUID().toString()
         project = null
         timeline.clear()

@@ -58,11 +58,13 @@ import okhttp3.Request
 
 /** Downloads and caches web images for the chat. */
 object ImageLoader {
-    private val cache = object : LruCache<String, Bitmap>(48 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Bitmap>(20 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    suspend fun load(url: String, maxSide: Int = 1200): Bitmap? {
+    fun clear() = cache.evictAll()
+
+    suspend fun load(url: String, maxSide: Int = 900): Bitmap? {
         cache.get(url)?.let { return it }
         return withContext(Dispatchers.IO) {
             runCatching {
