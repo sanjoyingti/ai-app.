@@ -1,6 +1,10 @@
 package com.aiapp.builder
 
+import com.aiapp.llm.await
+
 import com.aiapp.llm.ChatMessage
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import com.aiapp.llm.Effort
 import com.aiapp.llm.Http
 import com.aiapp.llm.ProviderId
@@ -652,9 +656,12 @@ class BuildAgent(
                 return GitHubClient.Run(run?.id ?: 0, "completed", STEERED, run?.url.orEmpty())
             }
             run = runCatching { gh.runFor(repo, sha, workflowFile) }.getOrNull() ?: run
+            coroutineContext.ensureActive() // Stop pressed: leave now
+            run?.let { r -> BuildRunner.cancelRemote = { gh.cancelRun(repo, r.id) } }
             if (run == null && System.currentTimeMillis() - start > 3 * 60_000) return null
             val r = run
             if (r?.status == "completed") {
+                BuildRunner.cancelRemote = null
                 onProgress(null, "")
                 return r
             }
@@ -702,7 +709,7 @@ class BuildAgent(
 
     private suspend fun httpText(url: String): String? = withContext(Dispatchers.IO) {
         runCatching {
-            Http.client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            Http.client.newCall(Request.Builder().url(url).build()).await().use { r ->
                 if (r.isSuccessful) r.body?.string() else null
             }
         }.getOrNull()
@@ -748,7 +755,7 @@ class BuildAgent(
         step(BuildEvent.Kind.DOWNLOAD, "Downloading ${path.substringAfterLast('/')} from $host")
         val bytes = withContext(Dispatchers.IO) {
             runCatching {
-                Http.client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                Http.client.newCall(Request.Builder().url(url).build()).await().use { r ->
                     if (!r.isSuccessful) return@use null
                     val len = r.body?.contentLength() ?: -1
                     if (len > MAX_DOWNLOAD) return@use null

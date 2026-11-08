@@ -49,6 +49,10 @@ object BuildRunner {
     var progressText by mutableStateOf("")
         internal set
 
+    /** Cancels the GitHub build that is running now (set while waiting for one). */
+    @Volatile
+    internal var cancelRemote: (suspend () -> Unit)? = null
+
     /** Messages you send while a build runs; the agent picks them up at its next step. */
     internal val guidance = java.util.concurrent.ConcurrentLinkedQueue<String>()
 

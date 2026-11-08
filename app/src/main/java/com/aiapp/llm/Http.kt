@@ -21,6 +21,23 @@ import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+/**
+ * Runs an HTTP call that stops the moment its coroutine is cancelled (e.g. you press Stop),
+ * instead of blocking until the server answers.
+ */
+suspend fun Call.await(): Response = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+    cont.invokeOnCancellation { runCatching { cancel() } }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (cont.isActive) cont.resumeWith(Result.failure(e))
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            if (cont.isActive) cont.resumeWith(Result.success(response)) else response.close()
+        }
+    })
+}
+
 object Http {
     val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -36,7 +53,7 @@ object Http {
             .apply { headers.forEach { (k, v) -> header(k, v) } }
             .get()
             .build()
-        client.newCall(request).execute().use { resp ->
+        client.newCall(request).await().use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ProviderException(resp.code, errorMessage(resp.code, body))
             json.parseToJsonElement(body).jsonObject
@@ -46,7 +63,7 @@ object Http {
     suspend fun getJsonArray(url: String, headers: Map<String, String> = emptyMap()): kotlinx.serialization.json.JsonArray =
         withContext(Dispatchers.IO) {
             val request = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.get().build()
-            client.newCall(request).execute().use { resp ->
+            client.newCall(request).await().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) throw ProviderException(resp.code, errorMessage(resp.code, body))
                 json.parseToJsonElement(body) as? kotlinx.serialization.json.JsonArray
@@ -59,7 +76,7 @@ object Http {
             .apply { headers.forEach { (k, v) -> header(k, v) } }
             .post(body.toRequestBody(jsonType))
             .build()
-        client.newCall(request).execute().use { resp ->
+        client.newCall(request).await().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ProviderException(resp.code, errorMessage(resp.code, text))
             json.parseToJsonElement(text).jsonObject

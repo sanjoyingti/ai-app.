@@ -1,5 +1,7 @@
 package com.aiapp.builder
 
+import com.aiapp.llm.await
+
 import com.aiapp.llm.Http
 import com.aiapp.llm.ProviderException
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +54,7 @@ class GitHubClient(private val token: String) {
         withContext(Dispatchers.IO) {
             val rb = body?.toString()?.toRequestBody(jsonType)
             val req = request("$api$path").method(method, rb).build()
-            Http.client.newCall(req).execute().use { resp ->
+            Http.client.newCall(req).await().use { resp ->
                 val text = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     val msg = runCatching {
@@ -190,7 +192,7 @@ class GitHubClient(private val token: String) {
             }
         }
         val req = request("$api$base/git/blobs").post(body).build()
-        retrying { withContext(Dispatchers.IO) { Http.client.newCall(req).execute() } }.use { r ->
+        retrying { withContext(Dispatchers.IO) { Http.client.newCall(req).await() } }.use { r ->
             val text = r.body?.string().orEmpty()
             if (!r.isSuccessful) throw ProviderException(r.code, "GitHub: couldn't upload ${file.name} (HTTP ${r.code})")
             (Http.json.parseToJsonElement(text).jsonObject["sha"] as? JsonPrimitive)?.contentOrNull
@@ -248,7 +250,7 @@ class GitHubClient(private val token: String) {
                 withContext(Dispatchers.IO) {
                     val req = request("$api/repos/${repo.owner}/${repo.name}/actions/runs/$runId/logs").get().build()
                     val lines = mutableListOf<String>()
-                    Http.client.newCall(req).execute().use { resp ->
+                    Http.client.newCall(req).await().use { resp ->
                         if (!resp.isSuccessful) return@withContext null
                         ZipInputStream(resp.body!!.byteStream()).use { zip ->
                             while (true) {

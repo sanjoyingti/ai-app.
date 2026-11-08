@@ -49,7 +49,7 @@ object WebTools {
 
     private suspend fun get(url: String): String? = withContext(Dispatchers.IO) {
         runCatching {
-            Http.client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+            Http.client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).await().use { r ->
                 if (!r.isSuccessful) return@use null
                 val type = r.header("Content-Type").orEmpty()
                 if (type.isNotEmpty() && !type.contains("text") && !type.contains("json") && !type.contains("xml")) {

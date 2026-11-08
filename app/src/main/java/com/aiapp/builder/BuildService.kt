@@ -26,13 +26,32 @@ import java.io.IOException
 class BuildService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var job: Job? = null
+    @Volatile private var stoppedByUser = false
     private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            // Stop right now: the screen updates at once, the work is cancelled,
+            // and the GitHub build (if one is running) is cancelled too.
+            val cancelRemote = BuildRunner.cancelRemote
+            BuildRunner.cancelRemote = null
             job?.cancel()
+            if (BuildRunner.running) {
+                stoppedByUser = true
+                BuildRunner.running = false
+                BuildRunner.progress = null
+                BuildRunner.drainGuidance()
+                BuildRunner.timeline += TimelineItem.Result(false, "Stopped.")
+                BuildRunner.saveNow(this)
+            }
+            if (cancelRemote != null) {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { cancelRemote() } }
+            }
+            runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
             return START_NOT_STICKY
         }
         val request = BuildRunner.pending
@@ -46,6 +65,7 @@ class BuildService : Service() {
             .apply { acquire(60 * 60 * 1000L) }
 
         BuildRunner.running = true
+        stoppedByUser = false
         job = scope.launch {
             val result = try {
                 BuildAgent(
@@ -76,6 +96,8 @@ class BuildService : Service() {
             } catch (e: Throwable) {
                 BuildResult(false, friendly(e))
             }
+            BuildRunner.cancelRemote = null
+            if (stoppedByUser) return@launch // already shown as "Stopped."
             BuildRunner.timeline += TimelineItem.Result(result.success, result.message, result.apkUrl, result.repoUrl)
             BuildRunner.running = false
             BuildRunner.progress = null
