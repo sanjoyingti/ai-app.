@@ -112,11 +112,6 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
         if (openFile != null) openFile = null else if (showFiles) showFiles = false else showProjects = false
     }
 
-    CodespaceState.url?.let { url ->
-        CodespaceScreen(url, onClose = { CodespaceState.url = null })
-        return
-    }
-
     if (showProjects) {
         ProjectList(vm, onBack = { showProjects = false })
         return

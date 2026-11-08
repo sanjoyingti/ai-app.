@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -38,6 +40,20 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = screen != "chat") { screen = "chat" }
                 val buildVm: BuildViewModel = viewModel()
                 val createVm: CreateViewModel = viewModel()
+                // VS Code (Codespace) on top when open; it keeps running while you use the app.
+                if (com.aiapp.ui.CodespaceState.visible) {
+                    com.aiapp.ui.CodespaceScreen()
+                    return@AppTheme
+                }
+                androidx.compose.foundation.layout.Column(
+                    androidx.compose.ui.Modifier.fillMaxSize(),
+                ) {
+                    if (com.aiapp.ui.CodespaceState.alive) {
+                        androidx.compose.foundation.layout.Box(
+                            androidx.compose.ui.Modifier.windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars),
+                        ) { com.aiapp.ui.CodespaceReturnBar() }
+                    }
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.weight(1f)) {
                 when (screen) {
                     "chat" -> ChatScreen(
                         vm,
@@ -50,6 +66,8 @@ class MainActivity : ComponentActivity() {
                     "create" -> CreateScreen(createVm, onBack = { screen = "chat" }, onOpenSettings = { screen = "settings" })
                     "build" -> BuildScreen(vm, buildVm, onBack = { screen = "chat" }, onOpenSettings = { screen = "settings" })
                     else -> SettingsScreen(vm, onBack = { screen = "chat" })
+                }
+                    }
                 }
             }
         }

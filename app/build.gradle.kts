@@ -13,8 +13,8 @@ android {
         applicationId = "com.aiapp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.19.3"
+        versionCode = 36
+        versionName = "0.19.4"
     }
 
     signingConfigs {
