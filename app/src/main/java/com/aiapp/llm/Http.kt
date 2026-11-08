@@ -43,6 +43,29 @@ object Http {
         }
     }
 
+    suspend fun getJsonArray(url: String, headers: Map<String, String> = emptyMap()): kotlinx.serialization.json.JsonArray =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.get().build()
+            client.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) throw ProviderException(resp.code, errorMessage(resp.code, body))
+                json.parseToJsonElement(body) as? kotlinx.serialization.json.JsonArray
+                    ?: throw ProviderException(500, "Unexpected response")
+            }
+        }
+
+    suspend fun postJson(url: String, headers: Map<String, String>, body: String): JsonObject = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url)
+            .apply { headers.forEach { (k, v) -> header(k, v) } }
+            .post(body.toRequestBody(jsonType))
+            .build()
+        client.newCall(request).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ProviderException(resp.code, errorMessage(resp.code, text))
+            json.parseToJsonElement(text).jsonObject
+        }
+    }
+
     /** POSTs [body] and emits the payload of every server-sent-event `data:` line. Cancelling the flow cancels the request. */
     fun sse(url: String, headers: Map<String, String>, body: String): Flow<String> = callbackFlow {
         val request = Request.Builder().url(url)

@@ -45,6 +45,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ChatStore(app)
     private var conversationId: String = prefs.getString("current_chat", null) ?: UUID.randomUUID().toString()
+        set(value) {
+            field = value
+            currentChatId = value
+        }
+
+    /** The open chat, highlighted in the Chats drawer. */
+    var currentChatId by mutableStateOf("")
+        private set
 
     /** Files picked for the next message. */
     val pendingAttachments = mutableStateListOf<com.aiapp.llm.Attachment>()
@@ -117,7 +125,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     var provider by mutableStateOf(
-        enumValueOrDefault(prefs.getString("provider", null), ProviderId.CLAUDE),
+        // New installs start on the free, no-key models so everything works straight away.
+        enumValueOrDefault(prefs.getString("provider", null), ProviderId.FREE),
     )
         private set
     var models by mutableStateOf<List<ModelInfo>>(emptyList())
@@ -160,19 +169,37 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return Providers.offline.isDownloaded(m)
     }
 
+    /** A message waiting for its offline model to finish downloading. */
+    private var pendingSend: Pair<String, Boolean>? = null
+
     fun downloadOffline(m: OfflineModel) {
         if (downloadJobs[m.id]?.isActive == true) return
         downloadErrors.remove(m.id)
         downloads[m.id] = 0f
         downloadJobs[m.id] = viewModelScope.launch {
             try {
-                Providers.offline.download(m) { p -> viewModelScope.launch { if (m.id in downloads) downloads[m.id] = p } }
+                Providers.offline.download(m) { p ->
+                    viewModelScope.launch {
+                        if (m.id in downloads) downloads[m.id] = p
+                        if (pendingSend != null) status = "Downloading ${m.name}… ${(p * 100).toInt()}% (one time)"
+                    }
+                }
                 offlineVersion++
                 if (provider == ProviderId.OFFLINE) refreshModels()
+                pendingSend?.let { (text, voice) ->
+                    pendingSend = null
+                    status = null
+                    send(text, voice)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 downloadErrors[m.id] = friendly(e)
+                if (pendingSend != null) {
+                    pendingSend = null
+                    status = null
+                    error = "Couldn't download ${m.name}: ${friendly(e)}"
+                }
             } finally {
                 downloads.remove(m.id)
                 downloadJobs.remove(m.id)
@@ -200,6 +227,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        currentChatId = conversationId
         store.load(conversationId)?.let { messages.addAll(it.messages) }
         refreshModels()
     }
@@ -527,6 +555,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         error = null
+        // Offline model not on the phone yet: download it first, then answer automatically.
+        if (provider == ProviderId.OFFLINE) {
+            val om = Providers.offline.byId(model)
+            if (om != null && !Providers.offline.isDownloaded(om)) {
+                pendingSend = trimmed to voice
+                status = "Downloading ${om.name} for offline use… (one time)"
+                downloadOffline(om)
+                return
+            }
+        }
         val attached = pendingAttachments.toList()
         val zip = attached.firstOrNull { it.isZip }
         if (zip != null && buildWords.containsMatchIn(trimmed)) {
@@ -549,7 +587,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         thoughtSeconds = 0
         streamingText = ""
         status = if (p == ProviderId.OFFLINE) "Loading offline model…" else "Thinking…"
-        val web = webEnabled
+        // Offline models always get internet tools, so they can look up anything they need.
+        val web = webEnabled || p == ProviderId.OFFLINE
         val base = if (voice) SYSTEM_PROMPT + VOICE_PROMPT else SYSTEM_PROMPT
         val system = if (web) base + WebTools.instructions(today()) else base
         job = viewModelScope.launch {

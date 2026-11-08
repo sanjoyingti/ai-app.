@@ -216,6 +216,22 @@ class GitHubClient(private val token: String) {
         )
     }
 
+    data class Step(val name: String, val status: String, val conclusion: String?)
+
+    /** The steps of the run's build job, to show live progress. */
+    suspend fun steps(repo: Repo, runId: Long): List<Step> {
+        val jobs = (call("GET", "/repos/${repo.owner}/${repo.name}/actions/runs/$runId/jobs") as? JsonObject)?.get("jobs") as? JsonArray
+        val job = jobs?.firstOrNull() as? JsonObject ?: return emptyList()
+        return ((job["steps"] as? JsonArray).orEmpty()).mapNotNull { s ->
+            val o = s as? JsonObject ?: return@mapNotNull null
+            Step(
+                name = (o["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                status = (o["status"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                conclusion = (o["conclusion"] as? JsonPrimitive)?.contentOrNull,
+            )
+        }
+    }
+
     /** Downloads the run's logs and keeps only the lines that explain a failure. */
     /**
      * Why a build failed: the error lines from the run's logs. If the logs can't be downloaded, falls

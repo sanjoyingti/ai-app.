@@ -21,17 +21,19 @@ Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
 
-## Status (v0.14, 8 Nov 2026)
+## Status (v0.15, 8 Nov 2026)
 
 Built and shipping from GitHub Releases (`releases/latest`):
 
 | Area | What works | Code |
 |---|---|---|
+| Free, no setup | "Free" provider (Pollinations.AI): DeepSeek, GPT, Mistral and other free models with no key or signup; default on new installs. Create tab is free-only: Pollinations image models (Flux etc.), attach a photo to base an image on (described by a free vision model). No free unlimited video exists, so video was removed | `llm/FreeProvider.kt`, `media/FreeImages.kt` |
 | Chat | Claude, Gemini, ChatGPT, Open models (OpenRouter), Offline; most-advanced-first picker; Low–Max effort; streaming; Stop | `llm/` |
 | Web access | Every model, offline included, can search (DuckDuckGo, Wikipedia fallback), read pages and save files to Downloads/AIApp; up to 6 lookups per answer; Web chip on by default | `llm/WebTools.kt`, `data/Downloads.kt` |
 | Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
 | History | Chats saved on the phone (Chats screen); every Build Mode project saved with its full agent timeline (Projects screen) so you can resume it later; Markdown rendering with copyable code blocks | `data/ChatStore.kt`, `builder/BuildRunner.kt`, `ui/Markdown.kt` |
 | Images and videos in chat | Ask for pictures or videos: models use `<images>`/`<videos>` tools (DuckDuckGo Images with Wikimedia fallback; YouTube search), results show under the reply; tap an image for full screen, play videos inline; Markdown images and YouTube links render too | `llm/MediaSearch.kt`, `ui/MediaViews.kt` |
+| Build progress | Live GitHub build stages (Starting machine → Java → Gradle → Compiling → Publishing) with step count, percentage and elapsed time, in the timeline and the notification | `builder/BuildAgent.kt` |
 | Reliability | Every GitHub call retries through network drops; build errors read from logs or, as a fallback, the workflow's error annotations; a wake lock keeps builds running with the screen off; checkpoints (last commit, files not yet uploaded, fix round) let "retry"/"continue" or the Retry button resume exactly where a build stopped | `builder/` |
 | Performance | Streaming redraws batched (~12/s); Markdown parsed once per text; Build Mode saves batched off the main thread; offline model unloaded after 3 idle minutes or when the app is hidden; smaller image cache | |
 | Live thinking | Claude (adaptive thinking, summarized), Gemini (includeThoughts) and OpenRouter models (reasoning) stream their reasoning; shown live in a Thinking box, then folded to "Thought for N s"; Build Mode shows it under the current step. Brain level = Effort chip | `ChatViewModel`, `ui/ChatScreen.kt` |

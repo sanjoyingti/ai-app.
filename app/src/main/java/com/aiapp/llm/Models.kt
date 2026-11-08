@@ -5,6 +5,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
 
 enum class ProviderId(val label: String, val needsKey: Boolean = true) {
+    /** Free, no key, works right after install. */
+    FREE("Free", needsKey = false),
     CLAUDE("Claude"),
     GEMINI("Gemini"),
     OPENAI("ChatGPT"),
@@ -115,6 +117,7 @@ object Providers {
         GeminiProvider(),
         OpenAiProvider(),
         OpenModelsProvider(),
+        FreeProvider(),
     ).associateBy { it.id }
 
     private lateinit var offlineProvider: OfflineProvider
@@ -134,6 +137,6 @@ object Providers {
     /** Live model list for [id], most advanced first. Offline models keep their catalog order. */
     suspend fun rankedModels(id: ProviderId, apiKey: String): List<ModelInfo> {
         val list = get(id).listModels(apiKey)
-        return if (id == ProviderId.OFFLINE) list else ModelRanking.rank(id, list)
+        return if (id == ProviderId.OFFLINE || id == ProviderId.FREE) list else ModelRanking.rank(id, list)
     }
 }

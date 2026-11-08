@@ -1,5 +1,11 @@
 package com.aiapp.ui
 
+import kotlinx.coroutines.launch
+
+import androidx.compose.material.icons.filled.Delete
+
+import androidx.compose.material.icons.filled.Menu
+
 import androidx.compose.foundation.clickable
 
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -243,14 +249,37 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
         return
     }
 
+    val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+    val drawerScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(drawerState.isOpen) { if (drawerState.isOpen) vm.refreshHistory() }
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ChatDrawer(
+                vm = vm,
+                onNew = {
+                    vm.newChat()
+                    drawerScope.launch { drawerState.close() }
+                },
+                onOpen = { id ->
+                    vm.openChat(id)
+                    drawerScope.launch { drawerState.close() }
+                },
+            )
+        },
+    ) {
     Scaffold(
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = { drawerScope.launch { drawerState.open() } }) {
+                        Icon(Icons.Filled.Menu, contentDescription = "Chats")
+                    }
+                },
                 title = { Text("AI App") },
                 actions = {
                     TextButton(onClick = onOpenBuild) { Text("Build") }
                     TextButton(onClick = onOpenCreate) { Text("Create") }
-                    TextButton(onClick = onOpenHistory) { Text("Chats") }
                     TextButton(onClick = vm::newChat) { Text("New") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
@@ -290,7 +319,7 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(vm.messages) { MessageBubble(it, onBuildZip = vm::buildZip) }
-                if (vm.streaming) {
+                if (vm.streaming || vm.status != null) {
                     item {
                         Column {
                             vm.status?.let {
@@ -311,6 +340,7 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
                 }
             }
         }
+    }
     }
 }
 
@@ -613,6 +643,55 @@ fun ThinkingBox(text: String, seconds: Int, live: Boolean) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+            }
+        }
+    }
+}
+
+/** Chat history as a slide-out drawer: "Chats", New chat, and each chat with a delete button. */
+@Composable
+private fun ChatDrawer(vm: ChatViewModel, onNew: () -> Unit, onOpen: (String) -> Unit) {
+    androidx.compose.material3.ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
+        Text(
+            "Chats",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(start = 28.dp, top = 40.dp, bottom = 20.dp),
+        )
+        androidx.compose.material3.NavigationDrawerItem(
+            icon = { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            label = { Text("New chat", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium) },
+            selected = false,
+            onClick = onNew,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        if (vm.history.isEmpty()) {
+            Text(
+                "No chats yet.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 28.dp, top = 8.dp),
+            )
+        }
+        LazyColumn {
+            items(vm.history, key = { it.id }) { c ->
+                val current = c.id == vm.currentChatId
+                Surface(
+                    color = if (current) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                    modifier = Modifier.fillMaxWidth().clickable { onOpen(c.id) },
+                ) {
+                    Row(Modifier.padding(start = 28.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            c.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { vm.deleteChat(c.id) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete chat", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             }
         }
     }

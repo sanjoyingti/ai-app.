@@ -496,15 +496,61 @@ class BuildAgent(
         return notes
     }
 
+    /** Friendly names for the build's steps on GitHub. */
+    private fun stageName(step: String): String {
+        val n = step.lowercase()
+        return when {
+            n.contains("set up job") -> "Starting the build machine"
+            n.contains("checkout") -> "Getting your code"
+            n.contains("java") -> "Setting up Java"
+            n.contains("setup-gradle") || n.contains("set up gradle") || n.contains("gradle/actions") -> "Setting up Gradle"
+            n.contains("signing") -> "Preparing the signing key"
+            n.contains("build") && n.contains("apk") -> "Compiling and packaging the APK"
+            n.contains("report") -> "Collecting error details"
+            n.contains("rename") || n.contains("collect") -> "Collecting the APK"
+            n.contains("release") -> "Publishing the download"
+            n.contains("post") || n.contains("complete") -> "Finishing up"
+            else -> step
+        }
+    }
+
     private suspend fun waitForRun(repo: GitHubClient.Repo, sha: String): GitHubClient.Run? {
         var run: GitHubClient.Run? = null
         val start = System.currentTimeMillis()
+        var lastStage = ""
         while (System.currentTimeMillis() - start < 35 * 60_000) {
             run = runCatching { gh.runFor(repo, sha, workflowFile) }.getOrNull() ?: run
             if (run == null && System.currentTimeMillis() - start > 3 * 60_000) return null
-            if (run?.status == "completed") return run
-            delay(10_000)
+            val r = run
+            if (r?.status == "completed") {
+                onProgress(null, "")
+                return r
+            }
+            val secs = (System.currentTimeMillis() - start) / 1000
+            val elapsed = "${secs / 60}:${(secs % 60).toString().padStart(2, '0')}"
+            if (r == null || r.status == "queued") {
+                onProgress(-1f, "Waiting for a GitHub build machine… $elapsed")
+            } else {
+                // Live stage and percentage from the job's steps.
+                val steps = runCatching { gh.steps(repo, r.id) }.getOrNull().orEmpty()
+                    .filter { !it.name.startsWith("Post ") }
+                if (steps.isNotEmpty()) {
+                    val done = steps.count { it.status == "completed" }
+                    val current = steps.firstOrNull { it.status == "in_progress" } ?: steps.firstOrNull { it.status != "completed" }
+                    val stage = current?.let { stageName(it.name) } ?: "Finishing up"
+                    val pct = (done.toFloat() / steps.size).coerceIn(0.02f, 0.98f)
+                    onProgress(pct, "$stage · step ${(done + 1).coerceAtMost(steps.size)} of ${steps.size} · $elapsed")
+                    if (stage != lastStage) {
+                        lastStage = stage
+                        step(BuildEvent.Kind.BUILD, stage)
+                    }
+                } else {
+                    onProgress(-1f, "Building… $elapsed")
+                }
+            }
+            delay(6_000)
         }
+        onProgress(null, "")
         return run
     }
 
