@@ -35,6 +35,62 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
     var resultBytes by mutableStateOf<ByteArray?>(null)
         private set
 
+    /** Image or video. */
+    var video by mutableStateOf(false)
+    /** "story" = free unlimited story video; "ai" = free AI clip (daily limit). */
+    var videoKind by mutableStateOf("story")
+    var scenes by mutableStateOf(6)
+    var captions by mutableStateOf(true)
+    var progress by mutableStateOf<Float?>(null)
+        private set
+    var resultIsVideo by mutableStateOf(false)
+        private set
+
+    private val keys = com.aiapp.data.ApiKeys(app)
+
+    fun generateVideo(prompt: String) {
+        if (busy || prompt.isBlank()) return
+        val portrait = shape == "portrait"
+        busy = true
+        error = null
+        resultUri = null
+        resultBytes = null
+        progress = 0f
+        job = viewModelScope.launch {
+            try {
+                val bytes: ByteArray = if (videoKind == "ai") {
+                    status = "Starting free AI video…"
+                    progress = -1f
+                    com.aiapp.media.HfVideo.generate(prompt.trim(), portrait, keys.getExtra("HF")) { s -> status = s }
+                } else {
+                    val file = com.aiapp.media.StoryVideo.make(app, prompt.trim(), scenes, portrait, captions, model) { p, s ->
+                        viewModelScope.launch {
+                            progress = p
+                            status = s
+                        }
+                    }
+                    file.readBytes().also { file.delete() }
+                }
+                status = "Saving to your gallery…"
+                resultUri = MediaGen.saveToGallery(app, bytes, video = true)
+                resultIsVideo = true
+                status = "✓ Saved to Movies/AIApp"
+            } catch (e: CancellationException) {
+                status = null
+                throw e
+            } catch (e: Throwable) {
+                status = null
+                error = when {
+                    e is IOException -> "Network error. Check your connection and try again."
+                    else -> e.message ?: "Something went wrong."
+                }
+            } finally {
+                busy = false
+                progress = null
+            }
+        }
+    }
+
     /** A photo to base the new image on. */
     var reference by mutableStateOf<Attachment?>(null)
     var attachProgress by mutableStateOf<Float?>(null)
@@ -85,6 +141,7 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
                 status = "Saving to your gallery…"
                 resultUri = MediaGen.saveToGallery(app, bytes, video = false)
                 resultBytes = bytes
+                resultIsVideo = false
                 status = "✓ Saved to Pictures/AIApp"
             } catch (e: CancellationException) {
                 status = null

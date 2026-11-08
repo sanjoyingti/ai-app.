@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -71,7 +72,26 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
             Modifier.padding(padding).fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !vm.video, onClick = { vm.video = false }, label = { Text("Image") })
+                FilterChip(selected = vm.video, onClick = { vm.video = true; if (vm.shape == "square") vm.shape = "landscape" }, label = { Text("Video") })
+            }
+            if (vm.video) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = vm.videoKind == "story", onClick = { vm.videoKind = "story" }, label = { Text("Story video · unlimited") })
+                    FilterChip(selected = vm.videoKind == "ai", onClick = { vm.videoKind = "ai" }, label = { Text("AI clip · daily limit") })
+                }
+                Text(
+                    if (vm.videoKind == "story") {
+                        "Free and unlimited: AI draws each scene, then your phone animates them into a cinematic video with camera moves, fades and captions."
+                    } else {
+                        "Real AI motion from open models (LTX-Video, Wan) on free servers. 3–5 s clips, a few per day; add a free Hugging Face token in Settings for more."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!vm.video || vm.videoKind == "story") Column {
                 OutlinedButton(onClick = { modelMenu = true }) {
                     Text(vm.models.firstOrNull { it.id == vm.model }?.name ?: vm.model.ifBlank { "Loading models…" })
                 }
@@ -85,13 +105,27 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("square" to "Square", "portrait" to "Portrait", "landscape" to "Landscape").forEach { (id, label) ->
+                val shapes = if (vm.video) listOf("landscape" to "Landscape 16:9", "portrait" to "Portrait 9:16")
+                else listOf("square" to "Square", "portrait" to "Portrait", "landscape" to "Landscape")
+                shapes.forEach { (id, label) ->
                     FilterChip(selected = vm.shape == id, onClick = { vm.shape = id }, label = { Text(label) })
+                }
+            }
+            if (vm.video && vm.videoKind == "story") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Scenes:", style = MaterialTheme.typography.bodyMedium)
+                    listOf(4, 6, 8).forEach { n ->
+                        FilterChip(selected = vm.scenes == n, onClick = { vm.scenes = n }, label = { Text("$n (${n * 4}s)") })
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Captions", modifier = Modifier.weight(1f))
+                    androidx.compose.material3.Switch(checked = vm.captions, onCheckedChange = { vm.captions = it })
                 }
             }
 
             // Attach a photo to base the new image on.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!vm.video) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = { pickPhoto.launch(arrayOf("image/*")) }) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text(if (vm.reference == null) " Attach photo" else " Change photo")
@@ -110,16 +144,20 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
             OutlinedTextField(
                 value = prompt,
                 onValueChange = { prompt = it },
-                label = { Text("Describe the image") },
+                label = { Text(if (vm.video) "Describe the video" else "Describe the image") },
                 placeholder = { Text("A cinematic photo of a tea garden in Assam at sunrise, mist, golden light") },
                 minLines = 3,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (vm.busy) {
-                UploadBar(vm.status ?: "Creating image…", -1f)
+                UploadBar(vm.status ?: "Working…", vm.progress ?: -1f)
                 OutlinedButton(onClick = vm::cancel) { Text("Cancel") }
             } else {
-                Button(onClick = { vm.generate(prompt) }, enabled = prompt.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Create image") }
+                Button(
+                    onClick = { if (vm.video) vm.generateVideo(prompt) else vm.generate(prompt) },
+                    enabled = prompt.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (vm.video) "Create video" else "Create image") }
                 vm.status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             }
             vm.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -130,24 +168,40 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
                 }
             }
             vm.resultUri?.let { uri ->
+                val mime = if (vm.resultIsVideo) "video/mp4" else "image/*"
+                if (vm.resultIsVideo) {
+                    // Plays right here; tap for controls.
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { ctx ->
+                            android.widget.VideoView(ctx).apply {
+                                setMediaController(android.widget.MediaController(ctx).also { it.setAnchorView(this) })
+                                setVideoURI(uri)
+                                setOnPreparedListener { mp -> mp.isLooping = true; start() }
+                            }
+                        },
+                        update = { v -> if (v.tag != uri) { v.tag = uri; v.setVideoURI(uri) } },
+                        modifier = Modifier.fillMaxWidth().aspectRatio(if (vm.shape == "portrait") 9f / 16f else 16f / 9f),
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {
                         runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                            context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                         }
-                    }) { Text("Open") }
+                    }) { Text(if (vm.resultIsVideo) "Open in player" else "Open") }
                     OutlinedButton(onClick = {
-                        val share = Intent(Intent.ACTION_SEND).setType("image/*").putExtra(Intent.EXTRA_STREAM, uri)
+                        val share = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri)
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         runCatching { context.startActivity(Intent.createChooser(share, "Share")) }
                     }) { Text("Share") }
                 }
             }
             Text(
-                "Free images by Pollinations.AI using open models. No key needed. Video isn't available for free without limits yet.",
+                "Free images by Pollinations.AI (open models, no key). Story videos are made on your phone, unlimited. AI clips use free Hugging Face servers with a daily limit.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
+

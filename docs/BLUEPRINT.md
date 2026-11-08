@@ -21,13 +21,13 @@ Version 2.0 (7 Nov 2026). Owner: sanjoyingti. Repo: https://github.com/sanjoying
 | 13 | Unrestricted adult mode | §10: limits apply; not built |
 | 14 | Fixed safety limits and the files that enforce them | §10, `safety-module/` |
 
-## Status (v0.15, 8 Nov 2026)
+## Status (v0.16, 8 Nov 2026)
 
 Built and shipping from GitHub Releases (`releases/latest`):
 
 | Area | What works | Code |
 |---|---|---|
-| Free, no setup | "Free" provider (Pollinations.AI): DeepSeek, GPT, Mistral and other free models with no key or signup; default on new installs. Create tab is free-only: Pollinations image models (Flux etc.), attach a photo to base an image on (described by a free vision model). No free unlimited video exists, so video was removed | `llm/FreeProvider.kt`, `media/FreeImages.kt` |
+| Free, no setup | "Free" provider (Pollinations.AI): DeepSeek, GPT, Mistral and other free models with no key or signup; default on new installs. Create tab is free-only: Pollinations image models (Flux etc.), attach a photo to base an image on (described by a free vision model). Video: **Story video** (free, unlimited: free LLM storyboard → Flux scenes → on-phone H.264 with Ken Burns moves, crossfades, captions) and **AI clip** (free, daily limit: LTX-Video/Wan on Hugging Face Spaces via the Gradio API, discovered at runtime; HF token raises the quota) | `llm/FreeProvider.kt`, `media/FreeImages.kt`, `media/StoryVideo.kt`, `media/HfVideo.kt` |
 | Chat | Claude, Gemini, ChatGPT, Open models (OpenRouter), Offline; most-advanced-first picker; Low–Max effort; streaming; Stop | `llm/` |
 | Web access | Every model, offline included, can search (DuckDuckGo, Wikipedia fallback), read pages and save files to Downloads/AIApp; up to 6 lookups per answer; Web chip on by default | `llm/WebTools.kt`, `data/Downloads.kt` |
 | Offline | Gemma 4 E4B/E2B, Gemma 3 1B via LiteRT-LM; add any LiteRT-LM model by Hugging Face link; optional HF token | `llm/OfflineProvider.kt` |
