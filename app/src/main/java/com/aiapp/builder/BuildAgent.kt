@@ -61,6 +61,7 @@ class BuildAgent(
     private val imported = req.project?.imported == true || req.zipPath != null
     private val workflowFile = if (imported) ProjectTemplate.IMPORT_WORKFLOW_FILE else "build.yml"
     private var importedName: String? = null
+    private var uploadedOnce = false
 
     private val files = linkedMapOf<String, String>().apply { req.project?.files?.let { putAll(it) } }
     private val deps = linkedSetOf<String>().apply { req.project?.deps?.let { addAll(it) } }
@@ -87,9 +88,14 @@ class BuildAgent(
         val existing = req.project
         val repo: GitHubClient.Repo
         var notes: List<String>
-        if (existing == null && req.zipPath != null) {
-            step(BuildEvent.Kind.STEP, "Unpacking ${req.zipName ?: "the project"}")
-            val zip = withContext(Dispatchers.IO) { ZipImport.read(java.io.File(req.zipPath), req.zipName ?: "project") }
+        val neverUploaded = existing != null && existing.imported && !existing.uploaded && existing.lastApkUrl == null
+        val resumeZip = existing?.takeIf { neverUploaded }?.zipPath?.takeIf { java.io.File(it).exists() }
+        val zipToRead = req.zipPath ?: resumeZip
+        if ((existing == null && req.zipPath != null) || resumeZip != null) {
+            val zipLabel = req.zipName ?: existing?.zipName ?: "the project"
+            if (resumeZip != null) step(BuildEvent.Kind.STEP, "The first upload didn't finish — uploading the whole project again")
+            step(BuildEvent.Kind.STEP, "Unpacking $zipLabel")
+            val zip = withContext(Dispatchers.IO) { ZipImport.read(java.io.File(zipToRead!!), zipLabel) }
             importedName = zip.name
             zip.files.forEach { (path, bytes) ->
                 pendingFiles[path] = bytes
@@ -103,8 +109,12 @@ class BuildAgent(
             step(BuildEvent.Kind.STEP, "Found ${zip.count} files in \"${zip.name}\"" + if (zip.skipped > 0) " (skipped ${zip.skipped} build/cache files)" else "")
             val repoName = zip.name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "project" }.take(40) +
                 "-" + SimpleDateFormat("yyMMdd-HHmm", Locale.US).format(Date())
-            step(BuildEvent.Kind.STEP, "Creating GitHub repo $repoName")
-            repo = gh.createRepo(repoName, "Uploaded to AI App: ${zip.name}")
+            repo = if (existing != null) {
+                GitHubClient.Repo(existing.owner, existing.repo, existing.branch, existing.repoUrl)
+            } else {
+                step(BuildEvent.Kind.STEP, "Creating GitHub repo $repoName")
+                gh.createRepo(repoName, "Uploaded to AI App: ${zip.name}")
+            }
             notes = emptyList()
         } else if (existing == null) {
             step(BuildEvent.Kind.THINKING, "Planning and writing the app with ${req.provider.label}")
@@ -138,6 +148,14 @@ class BuildAgent(
                     ProjectTemplate.files(appName, packageName, deps.toList()).getValue("app/build.gradle.kts").toByteArray()
                 depsChanged = false
             }
+            // Make sure GitHub always has the build instructions (harmless if unchanged).
+            if (imported) {
+                pendingFiles[".github/workflows/${ProjectTemplate.IMPORT_WORKFLOW_FILE}"] = ProjectTemplate.importWorkflow.toByteArray()
+            } else {
+                ProjectTemplate.files(appName, packageName, deps.toList())[".github/workflows/build.yml"]?.let {
+                    pendingFiles[".github/workflows/build.yml"] = it.toByteArray()
+                }
+            }
             val toUpload = pendingFiles.size + pendingDisk.size
             step(BuildEvent.Kind.STEP, "Uploading $toUpload changed file${if (toUpload == 1) "" else "s"} to GitHub")
             val message = when {
@@ -153,10 +171,21 @@ class BuildAgent(
             pendingFiles.clear()
             pendingDisk.values.forEach { it.delete() }
             pendingDisk.clear()
+            uploadedOnce = true
+            saveProject(repo, null)
 
             step(BuildEvent.Kind.BUILD, "Building the APK on GitHub (usually 3–5 minutes)")
             val run = waitForRun(repo, sha)
-                ?: return BuildResult(false, "GitHub didn't start a build. Check that your token has the 'workflow' scope.", repo.url)
+                ?: return BuildResult(
+                    false,
+                    if (neverUploaded) {
+                        "GitHub didn't start a build because this project's first upload never finished. Tap New, then upload the zip again."
+                    } else {
+                        "GitHub didn't start a build. Open the repo on GitHub → Actions: if Actions is turned off for the repo, " +
+                            "turn it on and try again; otherwise sign out and sign in with GitHub again in Settings."
+                    },
+                    repo.url,
+                )
 
             if (run.conclusion == "success") {
                 step(BuildEvent.Kind.STEP, "Build succeeded. Getting the download link")
@@ -205,6 +234,9 @@ class BuildAgent(
                 deps = deps.toList(),
                 lastApkUrl = apk ?: req.project?.lastApkUrl,
                 imported = imported,
+                zipPath = req.zipPath ?: req.project?.zipPath,
+                zipName = req.zipName ?: req.project?.zipName,
+                uploaded = uploadedOnce || req.project?.uploaded == true,
             ),
         )
     }

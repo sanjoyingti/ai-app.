@@ -37,4 +37,9 @@ data class Project(
     val lastApkUrl: String? = null,
     /** Uploaded from a .zip rather than written by the app (any file can be edited; own build setup). */
     val imported: Boolean = false,
+    /** The uploaded zip, kept so an interrupted upload can be finished later. */
+    val zipPath: String? = null,
+    val zipName: String? = null,
+    /** True once the project's files have reached GitHub at least once. */
+    val uploaded: Boolean = false,
 )
