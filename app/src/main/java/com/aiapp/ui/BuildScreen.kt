@@ -475,7 +475,19 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                         }
                         return@Button
                     }
-                    if (project != null && attached.isEmpty() && resumeWords.containsMatchIn(text)) {
+                    if (project == null && attached.isEmpty() && resumeWords.containsMatchIn(text)) {
+                        // No project open: continue the most recent one instead of starting over.
+                        val last = vm.projects().filter { it.project != null }.maxByOrNull { it.updated }
+                        if (last != null && vm.openProject(last.id)) {
+                            problem = ready()
+                            if (problem == null) {
+                                resumeBuild(chat, vm, text.trim())
+                                text = ""
+                            }
+                            return@Button
+                        }
+                    }
+                    if (vm.project != null && attached.isEmpty() && resumeWords.containsMatchIn(text)) {
                         problem = ready()
                         if (problem == null) {
                             resumeBuild(chat, vm, text.trim())

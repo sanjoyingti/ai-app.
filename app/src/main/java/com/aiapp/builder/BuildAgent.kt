@@ -172,6 +172,8 @@ class BuildAgent(
         saveProject(repo, null)
 
         var round = startRound
+        // A resumed build gets a fresh set of fix rounds, continuing the count from where it stopped.
+        val roundLimit = startRound + maxFixRounds
         while (true) {
           currentRound = round
           val sha: String
@@ -264,7 +266,7 @@ class BuildAgent(
                 )
             }
 
-            if (round >= maxFixRounds) {
+            if (round >= roundLimit) {
                 return BuildResult(false, "The build still fails after $round fix rounds. Try a higher Brain level or a stronger model.", repo.url)
             }
             round++
@@ -272,9 +274,35 @@ class BuildAgent(
             step(BuildEvent.Kind.STEP, "Reading the build errors")
             val errors = gh.failureSummary(repo, run.id)
             val count = errors.lines().count { it.startsWith("e: ") || it.contains("error:", true) }.coerceAtLeast(1)
-            step(BuildEvent.Kind.ERROR, "Build failed with $count error${if (count == 1) "" else "s"}. Fixing (round $round of $maxFixRounds)")
+            step(BuildEvent.Kind.ERROR, "Build failed with $count error${if (count == 1) "" else "s"}. Fixing (round $round of $roundLimit)")
+            autoFix(errors)
             notes = apply(ask(fixPrompt(errors, notes)))
             saveProject(repo, null)
+        }
+    }
+
+    /**
+     * Fixes well-known setup errors directly (no model needed), in the same round as the model's fixes,
+     * so a hidden next error shows up sooner.
+     */
+    private fun autoFix(errors: String) {
+        if (!imported) return
+        // "Dependency X requires libraries ... to compile against version 35 or later" → raise compileSdk.
+        val needed = Regex("compile against version (\\d+)").findAll(errors)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull()
+        if (needed != null) {
+            files.keys.filter { it.endsWith("build.gradle") || it.endsWith("build.gradle.kts") }.forEach { path ->
+                val old = files.getValue(path)
+                val updated = old
+                    .replace(Regex("(compileSdk(?:Version)?\\s*=?\\s*)(\\d+)")) { m ->
+                        if ((m.groupValues[2].toIntOrNull() ?: 0) < needed) m.groupValues[1] + needed else m.value
+                    }
+                if (updated != old) {
+                    files[path] = updated
+                    pendingFiles[path] = updated.toByteArray()
+                    step(BuildEvent.Kind.FILE, "Auto-fixed $path: compileSdk → $needed")
+                }
+            }
         }
     }
 
