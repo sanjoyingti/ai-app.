@@ -270,7 +270,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { store.save(c) }
     }
 
-    fun key(p: ProviderId): String = keys.get(p)
+    /** Bumped whenever a key changes, so screens showing key status redraw. */
+    var keysVersion by mutableStateOf(0)
+        private set
+
+    fun key(p: ProviderId): String {
+        keysVersion // read so Compose redraws when keys change
+        return keys.get(p)
+    }
 
     fun githubToken(): String = keys.getExtra("GITHUB")
 
@@ -400,8 +407,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val key = com.aiapp.llm.OpenRouterLogin.signIn(getApplication<Application>().packageName, open)
                 keys.set(ProviderId.OPEN, key)
+                keysVersion++
                 selectProvider(ProviderId.OPEN)
-                selectModel(Providers.DEEPSEEK_FREE)
+                selectModel("") // the strongest free model is picked once the list loads
                 refreshModels()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -420,6 +428,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveKey(p: ProviderId, value: String) {
         keys.set(p, value)
+        keysVersion++
         if (p == provider) refreshModels()
     }
 

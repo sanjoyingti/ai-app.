@@ -140,13 +140,9 @@ object Providers {
         if (id == ProviderId.OFFLINE || id == ProviderId.FREE) return list
         val ranked = ModelRanking.rank(id, list)
         if (id != ProviderId.OPEN) return ranked
-        // Newest free DeepSeek first: the best free coding model on OpenRouter.
-        val freeDeepSeek = ranked.filter { it.id.startsWith("deepseek/") && it.id.endsWith(":free") }
-            .sortedByDescending { m -> Regex("v(\\d+(?:\\.\\d+)?)").find(m.id)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0 }
-            .map { it.copy(name = "🆓 " + it.name.removePrefix("★ ")) }
-        val pinned = freeDeepSeek.ifEmpty { listOf(ModelInfo(DEEPSEEK_FREE, "🆓 DeepSeek V4 Flash (free)")) }
-        return pinned + ranked.filter { r -> pinned.none { it.id == r.id } }
+        // Free models first (detected live from OpenRouter's prices), strongest first.
+        val clean = ranked.map { it.copy(name = it.name.removePrefix("★ ")) }
+        val (free, paid) = clean.partition { it.name.startsWith(FREE_MARK) }
+        return free + paid
     }
-
-    const val DEEPSEEK_FREE = "deepseek/deepseek-v4-flash:free"
 }

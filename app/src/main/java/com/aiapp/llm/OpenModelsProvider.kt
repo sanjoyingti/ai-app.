@@ -16,6 +16,8 @@ import kotlinx.serialization.json.putJsonArray
  * The biggest open-weight models (Kimi, DeepSeek, GLM, Qwen and others), hosted in the cloud by
  * OpenRouter, so no PC is needed. One OpenRouter key reaches all of them; some have free versions.
  */
+const val FREE_MARK = "🆓 "
+
 class OpenModelsProvider : LlmProvider {
     override val id = ProviderId.OPEN
 
@@ -45,7 +47,12 @@ class OpenModelsProvider : LlmProvider {
             val outputs = ((o["architecture"] as? JsonObject)?.get("output_modalities") as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             if (outputs != null && "text" !in outputs) return@mapNotNull null
-            ModelInfo(id, (o["name"] as? JsonPrimitive)?.contentOrNull ?: id)
+            val name = (o["name"] as? JsonPrimitive)?.contentOrNull ?: id
+            // Free right now = zero price for both input and output (checked live, so it stays correct).
+            val pricing = o["pricing"] as? JsonObject
+            fun price(k: String) = (pricing?.get(k) as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
+            val free = id.endsWith(":free") || (price("prompt") == 0.0 && price("completion") == 0.0)
+            ModelInfo(id, if (free) FREE_MARK + name.removeSuffix(" (free)") + " (free)" else name)
         }
     }
 

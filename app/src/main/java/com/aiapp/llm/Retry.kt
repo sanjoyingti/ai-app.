@@ -8,6 +8,13 @@ import kotlinx.coroutines.flow.flow
 fun ProviderException.isTemporary() = code == 429 || code == 500 || code == 502 || code == 503 || code == 504 ||
     (message?.contains("high demand", true) == true) || (message?.contains("overloaded", true) == true)
 
+/** The chosen model can't be used at all (no longer free, no credits, removed): switch right away. */
+fun ProviderException.needsOtherModel() = code == 402 ||
+    (message?.contains("unavailable for free", true) == true) ||
+    (message?.contains("no endpoints", true) == true) ||
+    (message?.contains("insufficient credits", true) == true) ||
+    (message?.contains("not a valid model", true) == true)
+
 /**
  * Runs the request; if the server is busy or rate-limited before any text arrives, waits and tries
  * again (2 s, 5 s, 10 s). If [fallback] is given, the last try uses that model instead.
@@ -29,6 +36,14 @@ fun resilient(
             }
             return@flow
         } catch (e: ProviderException) {
+            if (!emitted && e.needsOtherModel() && fallback != null) {
+                val other = fallback()
+                if (other != null && other != current) {
+                    onRetry("$current isn't available — switching to $other")
+                    current = other
+                    continue
+                }
+            }
             if (emitted || !e.isTemporary() || i == waits.size) throw e
             if (i == waits.lastIndex && fallback != null) {
                 val other = fallback()
@@ -47,7 +62,12 @@ fun resilient(
 /** A different, usually less busy model from the same provider (Flash/Haiku/mini first). */
 suspend fun alternativeModel(provider: ProviderId, apiKey: String, current: String): String? {
     if (provider == ProviderId.OFFLINE) return null
-    val ids = runCatching { Providers.rankedModels(provider, apiKey).map { it.id } }.getOrNull() ?: return null
+    val list = runCatching { Providers.rankedModels(provider, apiKey) }.getOrNull() ?: return null
+    // Open models: stay on free models so nothing gets charged.
+    if (provider == ProviderId.OPEN) {
+        return list.firstOrNull { it.id != current && it.name.startsWith(FREE_MARK) }?.id
+    }
+    val ids = list.map { it.id }
     val fast = listOf("flash", "haiku", "mini", "sonnet")
     val bad = listOf("lite", "image", "tts", "audio", "live", "realtime", "embed", "transcribe", "search")
     return ids.firstOrNull { id -> id != current && fast.any { id.contains(it) } && bad.none { id.contains(it) } }

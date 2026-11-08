@@ -87,17 +87,20 @@ private fun KeyField(p: ProviderId, vm: ChatViewModel) {
         if (p == ProviderId.OPEN) {
             val uri = androidx.compose.ui.platform.LocalUriHandler.current
             HorizontalDivider()
-            Text("Free DeepSeek V4 (best free coding model)", style = MaterialTheme.typography.titleMedium)
+            Text("Free open models (DeepSeek, Kimi, Qwen and more)", style = MaterialTheme.typography.titleMedium)
             when {
                 vm.openRouterSigningIn -> {
                     Text("Finish signing in on the OpenRouter page, then come back here.")
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     TextButton(onClick = vm::cancelOpenRouterSignIn) { Text("Cancel") }
                 }
-                vm.key(p).isNotBlank() -> Text(
-                    "✓ Connected. In Chat and Build pick Open models → 🆓 DeepSeek V4 Flash (free).",
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                vm.key(p).isNotBlank() -> {
+                    Text(
+                        "✓ Connected. In Chat and Build pick Open models; models marked 🆓 are free (the list updates live).",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    OutlinedButton(onClick = { vm.saveKey(p, "") }) { Text("Sign out") }
+                }
                 else -> {
                     Button(onClick = { vm.signInOpenRouter { link -> runCatching { uri.openUri(link) } } }) {
                         Text("Sign in with OpenRouter")
@@ -111,6 +114,7 @@ private fun KeyField(p: ProviderId, vm: ChatViewModel) {
             }
             vm.openRouterError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
+        if (p == ProviderId.OPEN && vm.key(p).isNotBlank()) return@Column
         OutlinedTextField(
             value = text,
             onValueChange = {
