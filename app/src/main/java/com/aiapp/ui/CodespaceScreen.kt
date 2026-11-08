@@ -136,11 +136,11 @@ object CodespaceState {
         }
         webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
-                progress = newProgress
+                CodespaceState.progress = newProgress
             }
 
             override fun onReceivedTitle(view: WebView, t: String?) {
-                if (!t.isNullOrBlank()) title = t
+                if (!t.isNullOrBlank()) CodespaceState.title = t
             }
 
             // Sign-in pop-ups open in the same view.
