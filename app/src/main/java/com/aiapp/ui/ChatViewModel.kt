@@ -398,7 +398,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         openRouterSigningIn = true
         openRouterJob = viewModelScope.launch {
             try {
-                val key = com.aiapp.llm.OpenRouterLogin.signIn(app.packageName, open)
+                val key = com.aiapp.llm.OpenRouterLogin.signIn(getApplication<Application>().packageName, open)
                 keys.set(ProviderId.OPEN, key)
                 selectProvider(ProviderId.OPEN)
                 selectModel(Providers.DEEPSEEK_FREE)
