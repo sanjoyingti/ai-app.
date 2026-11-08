@@ -126,7 +126,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     var provider by mutableStateOf(
         // New installs start on the free, no-key models so everything works straight away.
-        enumValueOrDefault(prefs.getString("provider", null), ProviderId.FREE),
+        enumValueOrDefault(prefs.getString("provider", null), ProviderId.AUTO),
     )
         private set
     var models by mutableStateOf<List<ModelInfo>>(emptyList())
@@ -407,6 +407,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val key = com.aiapp.llm.OpenRouterLogin.signIn(getApplication<Application>().packageName, open)
                 keys.set(ProviderId.OPEN, key)
+                com.aiapp.llm.AutoChain.forget()
                 keysVersion++
                 selectProvider(ProviderId.OPEN)
                 selectModel("") // the strongest free model is picked once the list loads
@@ -428,6 +429,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveKey(p: ProviderId, value: String) {
         keys.set(p, value)
+        com.aiapp.llm.AutoChain.forget()
         keysVersion++
         if (p == provider) refreshModels()
     }
@@ -661,11 +663,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 var steps = 0
                 while (true) {
                     streamingText = ""
-                    resilient(
-                        attempt = { model -> Providers.get(p).stream(k, model, working.toList(), e, system) },
-                        model = m,
-                        fallback = { alternativeModel(p, k, m) },
-                        onRetry = { status = it },
+                    // Your chosen model first; if it can't answer, the strongest next one takes over.
+                    com.aiapp.llm.AutoChain.stream(
+                        first = if (p == ProviderId.AUTO) null else p to m,
+                        messages = working.toList(),
+                        effort = e,
+                        system = system,
+                        onStatus = { status = it },
                     ).collect { delta ->
                         if (delta.startsWith(com.aiapp.llm.THOUGHT)) {
                             // The model's reasoning, shown live in the Thinking box.

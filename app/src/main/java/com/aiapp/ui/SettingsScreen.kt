@@ -76,6 +76,7 @@ private fun keyUrl(p: ProviderId): String = when (p) {
     ProviderId.OPEN -> "openrouter.ai/keys, or just tap Sign in with OpenRouter above"
     ProviderId.OFFLINE -> ""
     ProviderId.FREE -> ""
+    ProviderId.AUTO -> ""
 }
 
 @Composable

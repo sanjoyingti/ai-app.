@@ -8,6 +8,12 @@ import kotlinx.coroutines.flow.flow
 fun ProviderException.isTemporary() = code == 429 || code == 500 || code == 502 || code == 503 || code == 504 ||
     (message?.contains("high demand", true) == true) || (message?.contains("overloaded", true) == true)
 
+/** Daily/monthly free allowance is used up. */
+fun ProviderException.isQuotaUsedUp() = message?.let {
+    it.contains("quota", true) || it.contains("exhausted", true) || it.contains("per day", true) ||
+        it.contains("limit exceeded", true) || it.contains("free-models-per-day", true)
+} == true
+
 /** The chosen model can't be used at all (no longer free, no credits, removed): switch right away. */
 fun ProviderException.needsOtherModel() = code == 402 ||
     (message?.contains("unavailable for free", true) == true) ||
@@ -44,6 +50,7 @@ fun resilient(
                     continue
                 }
             }
+            if (e.isQuotaUsedUp()) throw e // waiting won't help; the next model takes over
             if (emitted || !e.isTemporary() || i == waits.size) throw e
             if (i == waits.lastIndex && fallback != null) {
                 val other = fallback()

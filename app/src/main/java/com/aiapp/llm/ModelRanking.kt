@@ -25,6 +25,19 @@ object ModelRanking {
         ),
     )
 
+    /** Free open models, most powerful first (by model line and size). */
+    private val freeStrength = listOf(
+        "kimi" to 100, "deepseek-v4" to 95, "deepseek" to 90, "glm-5" to 88, "qwen3-coder" to 86, "qwen3.8" to 85,
+        "nemotron-3-ultra" to 84, "nemotron-ultra" to 82, "qwen3.7" to 80, "glm" to 75, "gemma-4-31" to 72,
+        "qwen3.6" to 70, "gpt-oss-120" to 68, "nemotron-3.5-super" to 65, "nemotron-3-super" to 64, "qwen" to 60,
+        "gemma-4-26" to 58, "llama" to 50, "mistral" to 45, "nemotron" to 40, "gemma" to 35,
+    )
+
+    fun strongestFree(models: List<ModelInfo>): List<ModelInfo> = models.sortedByDescending { m ->
+        val id = m.id.lowercase()
+        freeStrength.firstOrNull { id.contains(it.first) }?.second ?: 10
+    }
+
     private val versionRegex = Regex("(\\d+(?:[.-]\\d{1,2}(?!\\d))?)")
 
     /** Version number in the id, e.g. "claude-opus-5-5" → 5.5, "gemini-3.8-flash" → 3.8, "gpt-5.6" → 5.6. */

@@ -350,11 +350,13 @@ class BuildAgent(
             val sb = StringBuilder()
             val thinking = StringBuilder()
             var scanned = 0
-            com.aiapp.llm.resilient(
-                attempt = { model -> Providers.get(req.provider).stream(req.apiKey, model, working.toList(), effort, system) },
-                model = req.model,
-                fallback = { com.aiapp.llm.alternativeModel(req.provider, req.apiKey, req.model) },
-                onRetry = { step(BuildEvent.Kind.STEP, it) },
+            // Chosen model first; when it runs out or fails, the next strongest carries on.
+            com.aiapp.llm.AutoChain.stream(
+                first = if (req.provider == ProviderId.AUTO) null else req.provider to req.model,
+                messages = working.toList(),
+                effort = effort,
+                system = system,
+                onStatus = { step(BuildEvent.Kind.STEP, it) },
             ).collect { raw ->
                 if (raw.startsWith(com.aiapp.llm.THOUGHT)) {
                     // Show what the model is thinking, live, under the current step.

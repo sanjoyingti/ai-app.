@@ -5,6 +5,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
 
 enum class ProviderId(val label: String, val needsKey: Boolean = true) {
+    /** Strongest reachable model first, then the next, automatically. */
+    AUTO("Auto", needsKey = false),
     /** Free, no key, works right after install. */
     FREE("Free", needsKey = false),
     CLAUDE("Claude"),
@@ -118,6 +120,7 @@ object Providers {
         OpenAiProvider(),
         OpenModelsProvider(),
         FreeProvider(),
+        AutoProvider(),
     ).associateBy { it.id }
 
     private lateinit var offlineProvider: OfflineProvider
@@ -125,6 +128,8 @@ object Providers {
     /** Call once at startup: the offline engine needs the app's storage. */
     fun init(context: android.content.Context) {
         if (!::offlineProvider.isInitialized) offlineProvider = OfflineProvider(context)
+        val keys = com.aiapp.data.ApiKeys(context.applicationContext)
+        AutoChain.keyFor = { keys.get(it) }
     }
 
     val offline: OfflineProvider get() = offlineProvider
@@ -137,12 +142,12 @@ object Providers {
     /** Live model list for [id], most advanced first. Offline models keep their catalog order. */
     suspend fun rankedModels(id: ProviderId, apiKey: String): List<ModelInfo> {
         val list = get(id).listModels(apiKey)
-        if (id == ProviderId.OFFLINE || id == ProviderId.FREE) return list
+        if (id == ProviderId.OFFLINE || id == ProviderId.FREE || id == ProviderId.AUTO) return list
         val ranked = ModelRanking.rank(id, list)
         if (id != ProviderId.OPEN) return ranked
         // Free models first (detected live from OpenRouter's prices), strongest first.
         val clean = ranked.map { it.copy(name = it.name.removePrefix("★ ")) }
         val (free, paid) = clean.partition { it.name.startsWith(FREE_MARK) }
-        return free + paid
+        return ModelRanking.strongestFree(free) + paid
     }
 }
