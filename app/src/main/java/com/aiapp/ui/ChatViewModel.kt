@@ -385,6 +385,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    var openRouterSigningIn by mutableStateOf(false)
+        private set
+    var openRouterError by mutableStateOf<String?>(null)
+        private set
+    private var openRouterJob: kotlinx.coroutines.Job? = null
+
+    /** One-tap OpenRouter sign-in; afterwards switches Chat to free DeepSeek V4. */
+    fun signInOpenRouter(open: (String) -> Unit) {
+        if (openRouterSigningIn) return
+        openRouterError = null
+        openRouterSigningIn = true
+        openRouterJob = viewModelScope.launch {
+            try {
+                val key = com.aiapp.llm.OpenRouterLogin.signIn(app.packageName, open)
+                keys.set(ProviderId.OPEN, key)
+                selectProvider(ProviderId.OPEN)
+                selectModel(Providers.DEEPSEEK_FREE)
+                refreshModels()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                openRouterError = e.message ?: "Sign-in failed. Try again."
+            } finally {
+                openRouterSigningIn = false
+            }
+        }
+    }
+
+    fun cancelOpenRouterSignIn() {
+        openRouterJob?.cancel()
+        openRouterSigningIn = false
+    }
+
     fun saveKey(p: ProviderId, value: String) {
         keys.set(p, value)
         if (p == provider) refreshModels()

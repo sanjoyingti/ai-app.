@@ -73,7 +73,7 @@ private fun keyUrl(p: ProviderId): String = when (p) {
     ProviderId.CLAUDE -> "console.anthropic.com/settings/keys"
     ProviderId.GEMINI -> "aistudio.google.com/apikey"
     ProviderId.OPENAI -> "platform.openai.com/api-keys"
-    ProviderId.OPEN -> "openrouter.ai/keys (one key for Kimi, DeepSeek, GLM, Qwen; some are free)"
+    ProviderId.OPEN -> "openrouter.ai/keys, or just tap Sign in with OpenRouter above"
     ProviderId.OFFLINE -> ""
     ProviderId.FREE -> ""
 }
@@ -84,6 +84,33 @@ private fun KeyField(p: ProviderId, vm: ChatViewModel) {
     var note by remember(p) { mutableStateOf<String?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (p == ProviderId.OPEN) {
+            val uri = androidx.compose.ui.platform.LocalUriHandler.current
+            HorizontalDivider()
+            Text("Free DeepSeek V4 (best free coding model)", style = MaterialTheme.typography.titleMedium)
+            when {
+                vm.openRouterSigningIn -> {
+                    Text("Finish signing in on the OpenRouter page, then come back here.")
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    TextButton(onClick = vm::cancelOpenRouterSignIn) { Text("Cancel") }
+                }
+                vm.key(p).isNotBlank() -> Text(
+                    "✓ Connected. In Chat and Build pick Open models → 🆓 DeepSeek V4 Flash (free).",
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                else -> {
+                    Button(onClick = { vm.signInOpenRouter { link -> runCatching { uri.openUri(link) } } }) {
+                        Text("Sign in with OpenRouter")
+                    }
+                    Text(
+                        "One-time sign-in (Google works). No key to copy. Free models cost nothing; about 200 messages a day.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            vm.openRouterError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
         OutlinedTextField(
             value = text,
             onValueChange = {
