@@ -75,7 +75,10 @@ import com.aiapp.builder.BuildRunner
 import androidx.compose.runtime.remember
 import com.aiapp.llm.ProviderId
 
-private val resumeWords = Regex("^\\s*(retry|resume|continue|try again|go on|carry on|build now|rebuild)\\b", RegexOption.IGNORE_CASE)
+private val resumeWords = Regex(
+    "^\\s*(retry|resume|continue|try again|go on|carry on|build now|rebuild|(build|compile)( it| again| the app| the apk)?\\s*[.!]*\\s*$)",
+    RegexOption.IGNORE_CASE,
+)
 
 /** Starts a build that continues the open project from its last checkpoint. */
 private fun resumeBuild(chat: ChatViewModel, vm: BuildViewModel, text: String = "Retry") {

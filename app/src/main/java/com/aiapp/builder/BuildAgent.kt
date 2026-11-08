@@ -49,6 +49,8 @@ data class BuildResult(
  * Build Mode agent: the model writes or edits the app, GitHub Actions builds it, and build errors
  * go back to the model to fix, until the APK builds or the fix rounds for the Brain level run out.
  */
+private const val STEERED = "steered"
+
 class BuildAgent(
     private val req: BuildRequest,
     private val emit: (BuildEvent) -> Unit,
@@ -237,6 +239,14 @@ class BuildAgent(
                     repo.url,
                 )
 
+            if (run.conclusion == STEERED) {
+                takeGuidance()
+                step(BuildEvent.Kind.THINKING, "Stopped the GitHub build to make your changes first")
+                notes = apply(ask(guidancePrompt()))
+                saveProject(repo, null)
+                continue
+            }
+
             if (run.conclusion == "success" && takeGuidance()) {
                 // You asked for changes while GitHub was building: make them and build again.
                 step(BuildEvent.Kind.THINKING, "This build passed — now making the changes you asked for")
@@ -417,7 +427,7 @@ class BuildAgent(
     }
 
     private fun guidancePrompt() = buildString {
-        appendLine("Here is the Android app \"$appName\" you are building. It currently builds, but the user has asked for changes.")
+        appendLine("Here is the Android app \"$appName\" you are building. The user has asked for changes while it was building.")
         appendLine()
         appendLine("Current files:")
         appendFiles(steering.joinToString(" "))
@@ -427,7 +437,24 @@ class BuildAgent(
         appendLine("To delete a file, send it with the single line: DELETE")
     }
 
+    /** Thrown inside a model reply when you send new guidance, so the agent restarts with it at once. */
+    private class Steered : Exception("steered")
+
+    private var steerRestarts = 0
+
+    /** Asks the model; if you steer while it's writing, it stops and starts again with your message. */
     private suspend fun ask(rawPrompt: String, attachments: List<com.aiapp.llm.Attachment> = emptyList()): String {
+        while (true) {
+            try {
+                return askOnce(rawPrompt, attachments)
+            } catch (e: Steered) {
+                steerRestarts++
+                step(BuildEvent.Kind.THINKING, "Stopped writing to use your new message")
+            }
+        }
+    }
+
+    private suspend fun askOnce(rawPrompt: String, attachments: List<com.aiapp.llm.Attachment>): String {
         takeGuidance()
         val prompt = rawPrompt + steeringText()
         val effort = if (req.effort == Effort.AUTO) Effort.HIGH else req.effort
@@ -448,6 +475,8 @@ class BuildAgent(
                 system = system,
                 onStatus = { step(BuildEvent.Kind.STEP, it) },
             ).collect { raw ->
+                // New guidance from you: drop this reply and restart with it (at most 8 times per build).
+                if (steerRestarts < 8 && BuildRunner.guidance.isNotEmpty()) throw Steered()
                 if (raw.startsWith(com.aiapp.llm.THOUGHT)) {
                     // Show what the model is thinking, live, under the current step.
                     thinking.append(raw.substring(1))
@@ -616,6 +645,12 @@ class BuildAgent(
         val start = System.currentTimeMillis()
         var lastStage = ""
         while (System.currentTimeMillis() - start < 35 * 60_000) {
+            if (BuildRunner.guidance.isNotEmpty()) {
+                // You sent new instructions: stop this GitHub build and apply them right away.
+                onProgress(null, "")
+                run?.let { gh.cancelRun(repo, it.id) }
+                return GitHubClient.Run(run?.id ?: 0, "completed", STEERED, run?.url.orEmpty())
+            }
             run = runCatching { gh.runFor(repo, sha, workflowFile) }.getOrNull() ?: run
             if (run == null && System.currentTimeMillis() - start > 3 * 60_000) return null
             val r = run

@@ -200,6 +200,11 @@ class GitHubClient(private val token: String) {
 
     data class Run(val id: Long, val status: String, val conclusion: String?, val url: String)
 
+    /** Stops a GitHub build that is no longer needed (best effort). */
+    suspend fun cancelRun(repo: Repo, runId: Long) {
+        runCatching { call("POST", "/repos/${repo.owner}/${repo.name}/actions/runs/$runId/cancel") }
+    }
+
     /** The Actions run started by the push of [sha], or null if it hasn't appeared yet. */
     /** The run of [workflowFile] (e.g. "build.yml") for [sha]; other workflows in the repo are ignored. */
     suspend fun runFor(repo: Repo, sha: String, workflowFile: String? = null): Run? {

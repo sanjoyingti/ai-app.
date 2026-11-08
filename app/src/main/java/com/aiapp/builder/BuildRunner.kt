@@ -58,6 +58,7 @@ object BuildRunner {
         if (t.isEmpty()) return
         guidance += t
         timeline += TimelineItem.User(t)
+        timeline += TimelineItem.Event(BuildEvent(BuildEvent.Kind.STEP, "Got it — the agent is switching to your message now"))
         save(context)
     }
 
