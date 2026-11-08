@@ -286,7 +286,8 @@ private fun ResultCard(r: TimelineItem.Result, onRetry: (() -> Unit)? = null) {
                 r.repoUrl?.let { url -> TextButton(onClick = { uri.openUri(url) }) { Text("GitHub") } }
             }
             r.repoUrl?.let { url ->
-                OutlinedButton(onClick = { runCatching { uri.openUri(codespaceUrl(url)) } }, modifier = Modifier.fillMaxWidth()) {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                OutlinedButton(onClick = { openInApp(ctx, codespaceUrl(url)) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Open in Codespace (edit the code in VS Code)")
                 }
             }
@@ -659,8 +660,8 @@ private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
                         )
                     }
                     p.project?.repoUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                        val u = LocalUriHandler.current
-                        TextButton(onClick = { runCatching { u.openUri(codespaceUrl(url)) } }) { Text("Codespace") }
+                        val ctx = androidx.compose.ui.platform.LocalContext.current
+                        TextButton(onClick = { openInApp(ctx, codespaceUrl(url)) }) { Text("Codespace") }
                     }
                     if (!(current && vm.running)) {
                         TextButton(onClick = {
@@ -671,6 +672,25 @@ private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
                 }
                 HorizontalDivider()
             }
+        }
+    }
+}
+
+/**
+ * Opens [url] in a browser panel on top of the app (Chrome Custom Tab), so you stay in the app and
+ * it uses your Chrome GitHub login. Back closes it and returns to the project.
+ */
+private fun openInApp(context: android.content.Context, url: String) {
+    val uri = android.net.Uri.parse(url)
+    runCatching {
+        androidx.browser.customtabs.CustomTabsIntent.Builder()
+            .setShowTitle(true)
+            .setUrlBarHidingEnabled(true)
+            .build()
+            .launchUrl(context, uri)
+    }.onFailure {
+        runCatching {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
 }
