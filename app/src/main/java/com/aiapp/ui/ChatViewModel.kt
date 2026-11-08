@@ -287,6 +287,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return Providers.offline.allModels()
     }
 
+    var browseList by mutableStateOf<List<com.aiapp.llm.OfflineProvider.Available>?>(null)
+        private set
+    var browsing by mutableStateOf(false)
+        private set
+
+    fun browseOfflineModels() {
+        if (browsing) return
+        browsing = true
+        viewModelScope.launch {
+            browseList = runCatching { Providers.offline.browse() }.getOrDefault(emptyList())
+            browsing = false
+        }
+    }
+
+    /** One tap: add a model from the in-app list and start downloading it. */
+    fun downloadFromBrowse(repo: String) {
+        addOfflineModel(repo)
+    }
+
     /** Adds an offline model from a Hugging Face link. Returns an error message, or null on success. */
     fun addOfflineModel(link: String): String? {
         val m = Providers.offline.addCustom(link) ?: return "Paste a Hugging Face link like huggingface.co/litert-community/Gemma3-1B-IT"

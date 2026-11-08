@@ -102,6 +102,37 @@ class OfflineProvider(context: Context) : LlmProvider {
 
     fun byId(id: String): OfflineModel? = allModels().firstOrNull { it.id == id }
 
+    data class Available(val repo: String, val downloads: Long)
+
+    /**
+     * Every free, ready-to-run offline model (LiteRT-LM format, no sign-in needed), most popular
+     * first, so you can download one with a single tap.
+     */
+    suspend fun browse(): List<Available> {
+        val seen = mutableSetOf<String>()
+        val out = mutableListOf<Available>()
+        for (q in listOf("author=litert-community", "search=litert-lm", "search=litertlm")) {
+            val list = runCatching {
+                Http.getJsonArray("https://huggingface.co/api/models?$q&sort=downloads&direction=-1&limit=100&full=true", hfHeaders())
+            }.getOrNull() ?: continue
+            list.forEach { el ->
+                val o = el as? JsonObject ?: return@forEach
+                val id = (o["id"] as? JsonPrimitive)?.contentOrNull ?: return@forEach
+                val gated = o["gated"]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: "false"
+                if (gated != "false" && hfToken.isBlank()) return@forEach
+                val files = (o["siblings"] as? JsonArray).orEmpty().mapNotNull {
+                    ((it as? JsonObject)?.get("rfilename") as? JsonPrimitive)?.contentOrNull
+                }
+                if (files.none { it.endsWith(".litertlm") }) return@forEach
+                if (seen.add(id.lowercase())) {
+                    out += Available(id, (o["downloads"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0)
+                }
+            }
+        }
+        val known = OfflineCatalog.builtIn.map { it.repo.lowercase() }.toSet()
+        return out.filter { it.repo.lowercase() !in known }.sortedByDescending { it.downloads }
+    }
+
     /** Adds a model from a Hugging Face link; returns it, or null if the link isn't valid. */
     fun addCustom(link: String): OfflineModel? {
         val repo = OfflineCatalog.parseRepo(link) ?: return null

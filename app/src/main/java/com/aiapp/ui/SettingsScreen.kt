@@ -129,7 +129,10 @@ private fun OfflineSection(vm: ChatViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         vm.offlineModels().forEach { OfflineRow(it, vm) }
-        AddOfflineModel(vm)
+        BrowseOfflineModels(vm)
+        var showLink by remember { mutableStateOf(false) }
+        TextButton(onClick = { showLink = !showLink }) { Text(if (showLink) "Hide" else "Add from a link (advanced)") }
+        if (showLink) AddOfflineModel(vm)
     }
 }
 
@@ -297,6 +300,35 @@ private fun AddOfflineModel(vm: ChatViewModel) {
                 tokenNote = "Saved"
             }) { Text("Save token") }
             tokenNote?.let { Text("  $it", style = MaterialTheme.typography.labelMedium) }
+        }
+    }
+}
+
+/** All free offline models, each with a one-tap Download button — no website needed. */
+@Composable
+private fun BrowseOfflineModels(vm: ChatViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("More free offline models", style = MaterialTheme.typography.titleSmall)
+        val list = vm.browseList
+        when {
+            vm.browsing -> UploadBar("Loading the list…", -1f)
+            list == null -> OutlinedButton(onClick = vm::browseOfflineModels) { Text("Show all free offline models") }
+            list.isEmpty() -> Text("Couldn't load the list. Check your connection and try again.", style = MaterialTheme.typography.bodySmall)
+            else -> list.take(40).forEach { m ->
+                val added = vm.offlineModels().any { it.repo.equals(m.repo, true) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(m.repo.substringAfter('/'), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "${m.repo.substringBefore('/')} · ${m.downloads} downloads",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (added) Text("Added", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    else Button(onClick = { vm.downloadFromBrowse(m.repo) }) { Text("Download") }
+                }
+            }
         }
     }
 }
