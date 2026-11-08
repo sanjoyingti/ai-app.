@@ -49,6 +49,21 @@ object BuildRunner {
     var progressText by mutableStateOf("")
         internal set
 
+    /** Messages you send while a build runs; the agent picks them up at its next step. */
+    internal val guidance = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    /** Steer the running build, like talking to an IDE agent while it works. */
+    fun steer(context: Context, text: String) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        guidance += t
+        timeline += TimelineItem.User(t)
+        save(context)
+    }
+
+    /** Takes every guidance message that arrived since the last call. */
+    internal fun drainGuidance(): List<String> = generateSequence { guidance.poll() }.toList()
+
     /** The request the service should run next. */
     @Volatile
     internal var pending: BuildRequest? = null

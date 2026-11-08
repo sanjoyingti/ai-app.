@@ -392,8 +392,28 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                 }
             }
             if (vm.running) {
+                // Steer the build while it works: the agent uses your message at its next step.
+                var steer by rememberSaveable { mutableStateOf("") }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = steer,
+                        onValueChange = { steer = it },
+                        placeholder = { Text("Guide the build… (e.g. use a dark theme)") },
+                        maxLines = 4,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = {
+                        vm.steer(steer)
+                        steer = ""
+                    }, enabled = steer.isNotBlank()) { Text("Send") }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Working…", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Working… your messages are used at the next step",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedButton(onClick = vm::stop) { Text("Stop") }
                 }
                 return@Column

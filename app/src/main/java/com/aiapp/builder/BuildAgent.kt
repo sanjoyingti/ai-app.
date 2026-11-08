@@ -237,6 +237,15 @@ class BuildAgent(
                     repo.url,
                 )
 
+            if (run.conclusion == "success" && takeGuidance()) {
+                // You asked for changes while GitHub was building: make them and build again.
+                step(BuildEvent.Kind.THINKING, "This build passed — now making the changes you asked for")
+                notes = apply(ask(guidancePrompt()))
+                saveProject(repo, null)
+                if (pendingFiles.isNotEmpty() || depsChanged) continue
+                step(BuildEvent.Kind.STEP, "No file changes were needed for your guidance")
+            }
+
             if (run.conclusion == "success") {
                 step(BuildEvent.Kind.STEP, "Build succeeded. Getting the download link")
                 // Only hand over a link once the APK file is really there.
@@ -388,7 +397,39 @@ class BuildAgent(
         return if (notes.isEmpty()) "" else "\n\nFiles from the user:\n" + notes.joinToString("\n") { "- $it" }
     }
 
-    private suspend fun ask(prompt: String, attachments: List<com.aiapp.llm.Attachment> = emptyList()): String {
+    /** Everything you've told the agent during this run; it applies to every later step too. */
+    private val steering = mutableListOf<String>()
+
+    /** Picks up messages sent while working. Returns true if new ones arrived. */
+    private fun takeGuidance(): Boolean {
+        val fresh = BuildRunner.drainGuidance()
+        if (fresh.isEmpty()) return false
+        steering += fresh
+        step(BuildEvent.Kind.THINKING, "Got your guidance — applying it now: " + fresh.joinToString(" · ").take(140))
+        return true
+    }
+
+    private fun steeringText(): String = if (steering.isEmpty()) "" else buildString {
+        appendLine()
+        appendLine()
+        appendLine("IMPORTANT — the user sent these instructions while you were working. Follow them; the latest wins if they conflict:")
+        steering.forEachIndexed { i, s -> appendLine("${i + 1}. $s") }
+    }
+
+    private fun guidancePrompt() = buildString {
+        appendLine("Here is the Android app \"$appName\" you are building. It currently builds, but the user has asked for changes.")
+        appendLine()
+        appendLine("Current files:")
+        appendFiles(steering.joinToString(" "))
+        appendLine()
+        appendLine("Apply the user's instructions below now.")
+        appendLine("Reply with every file you change or add, in full, in the same format. Files you don't send stay as they are.")
+        appendLine("To delete a file, send it with the single line: DELETE")
+    }
+
+    private suspend fun ask(rawPrompt: String, attachments: List<com.aiapp.llm.Attachment> = emptyList()): String {
+        takeGuidance()
+        val prompt = rawPrompt + steeringText()
         val effort = if (req.effort == Effort.AUTO) Effort.HIGH else req.effort
         val system = (if (imported) ProjectTemplate.importedSystemPrompt else ProjectTemplate.systemPrompt(packageName)) +
             ProjectTemplate.webInstructions

@@ -22,6 +22,8 @@ class BuildViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun stop() = BuildService.stop(app)
 
+    fun steer(text: String) = com.aiapp.builder.BuildRunner.steer(app, text)
+
     fun newProject() = BuildRunner.newProject(app)
 
     fun projects() = BuildRunner.list(app)
