@@ -81,7 +81,8 @@ class GitHubClient(private val token: String) {
         message: String,
         /** Big files uploaded straight from storage, so they never have to fit in memory. */
         diskFiles: Map<String, java.io.File> = emptyMap(),
-        onProgress: (Int) -> Unit = {},
+        /** (files done, files total, bytes done, bytes total). */
+        onProgress: (Int, Int, Long, Long) -> Unit = { _, _, _, _ -> },
     ): String {
         val base = "/repos/${repo.owner}/${repo.name}"
         // auto_init can take a moment before the branch exists.
@@ -97,19 +98,27 @@ class GitHubClient(private val token: String) {
             ?.let { (it["sha"] as? JsonPrimitive)?.contentOrNull }
 
         var done = 0
+        val totalFiles = files.size + diskFiles.size
+        val totalBytes = files.values.sumOf { (it?.size ?: 0).toLong() } + diskFiles.values.sumOf { it.length() }
+        var bytesDone = 0L
+        onProgress(0, totalFiles, 0, totalBytes)
         val entries = files.map { (path, bytes) ->
-            if (++done % 50 == 0) onProgress(done)
             val blob = bytes?.let {
                 call("POST", "$base/git/blobs", buildJsonObject {
                     put("content", Base64.getEncoder().encodeToString(it))
                     put("encoding", "base64")
                 }).str("sha")!!
             }
+            bytesDone += bytes?.size ?: 0
+            onProgress(++done, totalFiles, bytesDone, totalBytes)
             path to blob
         }
         val diskEntries = diskFiles.map { (path, file) ->
-            if (++done % 50 == 0) onProgress(done)
-            path to blobFromFile(base, file)
+            val start = bytesDone
+            val sha = blobFromFile(base, file) { sent -> onProgress(done, totalFiles, start + sent, totalBytes) }
+            bytesDone = start + file.length()
+            onProgress(++done, totalFiles, bytesDone, totalBytes)
+            path to sha
         }
         val allEntries = entries + diskEntries
         val tree = call("POST", "$base/git/trees", buildJsonObject {
@@ -135,7 +144,7 @@ class GitHubClient(private val token: String) {
     }
 
     /** Creates a blob by streaming the file as base64 inside the JSON body (no big strings in memory). */
-    private suspend fun blobFromFile(base: String, file: java.io.File): String = withContext(Dispatchers.IO) {
+    private suspend fun blobFromFile(base: String, file: java.io.File, onBytes: (Long) -> Unit = {}): String = withContext(Dispatchers.IO) {
         val body = object : okhttp3.RequestBody() {
             override fun contentType() = jsonType
             override fun writeTo(sink: okio.BufferedSink) {
@@ -145,7 +154,21 @@ class GitHubClient(private val token: String) {
                     override fun write(b: ByteArray, off: Int, len: Int) { sink.write(b, off, len) }
                     override fun close() = Unit
                 })
-                file.inputStream().use { it.copyTo(out, 1 shl 16) }
+                file.inputStream().use { input ->
+                    val buf = ByteArray(1 shl 16)
+                    var sent = 0L
+                    var last = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        sent += n
+                        if (sent - last > 256 * 1024) {
+                            last = sent
+                            onBytes(sent)
+                        }
+                    }
+                }
                 out.close()
                 sink.writeUtf8("\"}")
             }

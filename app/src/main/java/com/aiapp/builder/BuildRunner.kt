@@ -42,6 +42,12 @@ object BuildRunner {
     var projectId by mutableStateOf(UUID.randomUUID().toString())
         private set
 
+    /** Live progress of the current long step (upload/unpack): 0..1, or null when there's none. */
+    var progress by mutableStateOf<Float?>(null)
+        internal set
+    var progressText by mutableStateOf("")
+        internal set
+
     /** The request the service should run next. */
     @Volatile
     internal var pending: BuildRequest? = null

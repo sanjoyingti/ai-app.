@@ -58,6 +58,13 @@ class BuildService : Service() {
                             BuildRunner.save(this@BuildService)
                         }
                     },
+                    onProgress = { value, text ->
+                        scope.launch {
+                            BuildRunner.progress = value
+                            BuildRunner.progressText = text
+                            if (value != null) notify(PROGRESS_ID, progressNotification(text.ifBlank { "Working…" }, value))
+                        }
+                    },
                 ).run()
             } catch (e: CancellationException) {
                 BuildResult(false, "Stopped.")
@@ -66,6 +73,7 @@ class BuildService : Service() {
             }
             BuildRunner.timeline += TimelineItem.Result(result.success, result.message, result.apkUrl, result.repoUrl)
             BuildRunner.running = false
+            BuildRunner.progress = null
             BuildRunner.save(this@BuildService)
             stopForeground(STOP_FOREGROUND_REMOVE)
             notify(DONE_ID, doneNotification(request.project?.appName ?: request.appName, result))
@@ -103,7 +111,7 @@ class BuildService : Service() {
         PendingIntent.FLAG_IMMUTABLE,
     )
 
-    private fun progressNotification(text: String): Notification {
+    private fun progressNotification(text: String, value: Float? = null): Notification {
         val stop = PendingIntent.getService(
             this, 1, Intent(this, BuildService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
         )
@@ -112,6 +120,7 @@ class BuildService : Service() {
             .setContentTitle("Building your app")
             .setContentText(text)
             .setOngoing(true)
+            .apply { if (value != null) setProgress(100, (value * 100).toInt().coerceIn(0, 100), value < 0f) }
             .setContentIntent(openAppIntent())
             .addAction(Notification.Action.Builder(
                 android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel), "Stop", stop,

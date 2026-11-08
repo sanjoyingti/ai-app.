@@ -27,7 +27,8 @@ object AttachmentStore {
         "swift", "rb", "php", "sh", "sql", "gradle", "properties", "css", "scss", "dart", "lua", "r", "tex",
     )
 
-    suspend fun import(context: Context, uri: Uri): Attachment = withContext(Dispatchers.IO) {
+    /** [onProgress] gets 0..1 while the file is copied (or -1 if the size is unknown). */
+    suspend fun import(context: Context, uri: Uri, onProgress: (Float) -> Unit = {}): Attachment = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         var name = "file"
         var size = -1L
@@ -50,8 +51,24 @@ object AttachmentStore {
 
         val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80)
         val out = File(dir, "${UUID.randomUUID().toString().take(8)}_$safe")
-        resolver.openInputStream(uri)?.use { input -> out.outputStream().use { input.copyTo(it, 1 shl 16) } }
-            ?: throw IllegalArgumentException("Couldn't open $name.")
+        resolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { o ->
+                val buf = ByteArray(1 shl 16)
+                var copied = 0L
+                var lastReport = 0L
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    o.write(buf, 0, n)
+                    copied += n
+                    if (copied - lastReport > 512 * 1024) {
+                        lastReport = copied
+                        onProgress(if (size > 0) (copied.toFloat() / size).coerceAtMost(0.99f) else -1f)
+                    }
+                }
+            }
+        } ?: throw IllegalArgumentException("Couldn't open $name.")
+        onProgress(1f)
 
         when {
             mime.startsWith("image/") && ext != "svg" -> {

@@ -51,17 +51,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var attaching by mutableStateOf(false)
         private set
 
+    /** Files being attached right now: name → progress 0..1 (-1 = size unknown). */
+    val attachProgress = mutableStateMapOf<String, Float>()
+
     fun attach(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
         attaching = true
         viewModelScope.launch {
-            uris.forEach { uri ->
+            uris.forEachIndexed { i, uri ->
+                val label = "file ${i + 1}"
+                attachProgress[label] = 0f
                 try {
-                    pendingAttachments += com.aiapp.data.AttachmentStore.import(getApplication(), uri)
+                    val a = com.aiapp.data.AttachmentStore.import(getApplication(), uri) { p ->
+                        viewModelScope.launch { if (label in attachProgress) attachProgress[label] = p }
+                    }
+                    pendingAttachments += a
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
                     error = e.message ?: "Couldn't attach that file."
+                } finally {
+                    attachProgress.remove(label)
                 }
             }
             attaching = false

@@ -491,10 +491,18 @@ private fun Composer(
                 .imePadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            if (vm.pendingAttachments.isNotEmpty() || vm.attaching) {
+            vm.attachProgress.toList().forEach { (_, p) -> UploadBar("Attaching…", p) }
+            if (vm.pendingAttachments.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     vm.pendingAttachments.toList().forEach { a -> AttachmentChip(a, onRemove = { vm.removeAttachment(a) }) }
-                    if (vm.attaching) Text("Attaching…", modifier = Modifier.padding(8.dp))
+                }
+                if (!vm.attaching) {
+                    Text(
+                        "✓ ${vm.pendingAttachments.size} file${if (vm.pendingAttachments.size == 1) "" else "s"} ready — add a message and send",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+                    )
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -543,6 +551,25 @@ private fun LiveSettings(vm: ChatViewModel, onChanged: () -> Unit) {
                 },
                 label = { Text("$name · $desc", color = white) },
             )
+        }
+    }
+}
+
+/** A Claude-style progress bar: label, bar and percentage (or a moving bar when the size is unknown). */
+@Composable
+fun UploadBar(label: String, progress: Float, detail: String = "") {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (progress >= 0f) Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+        }
+        if (progress >= 0f) {
+            androidx.compose.material3.LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+        } else {
+            androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+        }
+        if (detail.isNotBlank()) {
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }

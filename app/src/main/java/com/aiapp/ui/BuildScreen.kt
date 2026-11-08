@@ -149,7 +149,13 @@ fun BuildScreen(chat: ChatViewModel, vm: BuildViewModel, onBack: () -> Unit, onO
                     val isLast = index == vm.timeline.lastIndex
                     when (item) {
                         is TimelineItem.User -> UserBubble(item.text)
-                        is TimelineItem.Event -> EventRow(item.event, active = isLast && vm.running)
+                        is TimelineItem.Event -> {
+                            EventRow(item.event, active = isLast && vm.running)
+                            val prog = BuildRunner.progress
+                            if (isLast && vm.running && prog != null) {
+                                Column(Modifier.padding(start = 30.dp)) { UploadBar(BuildRunner.progressText.ifBlank { "Working…" }, prog) }
+                            }
+                        }
                         is TimelineItem.Result -> ResultCard(item)
                     }
                 }
@@ -241,9 +247,14 @@ private fun ResultCard(r: TimelineItem.Result) {
                 style = MaterialTheme.typography.titleMedium,
                 color = if (r.success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
+            r.apkUrl?.let { url -> ApkDownload(url) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                r.apkUrl?.let { url -> Button(onClick = { uri.openUri(url) }) { Text("Download APK") } }
-                r.repoUrl?.let { url -> OutlinedButton(onClick = { uri.openUri(url) }) { Text("GitHub") } }
+                r.apkUrl?.let { url -> TextButton(onClick = { uri.openUri(url) }) { Text("Open in browser") } }
+                r.apkUrl?.let { url ->
+                    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                    TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(url)) }) { Text("Copy link") }
+                }
+                r.repoUrl?.let { url -> TextButton(onClick = { uri.openUri(url) }) { Text("GitHub") } }
             }
             if (r.success) {
                 Text(
@@ -270,13 +281,15 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
 
     val attached = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateListOf<com.aiapp.llm.Attachment>() }
     var attaching by rememberSaveable { mutableStateOf(false) }
+    var attachPct by remember { mutableStateOf(0f) }
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         attaching = true
         scope.launch {
             uris.forEach { u ->
                 try {
-                    attached += com.aiapp.data.AttachmentStore.import(context, u)
+                    attachPct = 0f
+                    attached += com.aiapp.data.AttachmentStore.import(context, u) { v -> scope.launch { attachPct = v } }
                 } catch (e: Exception) {
                     problem = e.message ?: "Couldn't attach that file."
                 }
@@ -297,7 +310,8 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
         unpacking = true
         scope.launch {
             try {
-                val a = com.aiapp.data.AttachmentStore.import(context, uri)
+                attachPct = 0f
+                val a = com.aiapp.data.AttachmentStore.import(context, uri) { v -> scope.launch { attachPct = v } }
                 if (!a.name.endsWith(".zip", true)) {
                     problem = "Pick a .zip of an Android Studio project."
                 } else {
@@ -350,6 +364,7 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                     enabled = !unpacking,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (unpacking) "Reading project…" else "Upload Android Studio project (.zip) → APK") }
+                if (unpacking) UploadBar("Copying your project…", attachPct)
                 Text(
                     "…or describe a new app:",
                     style = MaterialTheme.typography.bodySmall,
@@ -363,7 +378,15 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (attached.isNotEmpty() || attaching) {
+            if (attaching) UploadBar("Attaching…", attachPct)
+            if (attached.isNotEmpty() && !attaching) {
+                Text(
+                    "✓ ${attached.size} file${if (attached.size == 1) "" else "s"} ready",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (attached.isNotEmpty()) {
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -377,7 +400,6 @@ private fun BuildComposer(chat: ChatViewModel, vm: BuildViewModel, onOpenSetting
                             }
                         }
                     }
-                    if (attaching) Text("Attaching…", style = MaterialTheme.typography.labelMedium)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -592,5 +614,70 @@ private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
                 HorizontalDivider()
             }
         }
+    }
+}
+
+/** Downloads the APK in the app with a progress bar, checks it, then opens Android's installer. */
+@Composable
+private fun ApkDownload(url: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var size by remember(url) { mutableStateOf<Long?>(null) }
+    var progress by remember(url) { mutableStateOf<Float?>(null) }
+    var file by remember(url) { mutableStateOf<java.io.File?>(null) }
+    var error by remember(url) { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(url) { size = com.aiapp.data.ApkInstaller.check(url) }
+
+    fun install(f: java.io.File) {
+        // Android asks once to allow installing apps from AI App.
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + context.packageName),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            error = "Allow \"Install unknown apps\" for AI App, come back, and tap Install."
+            return
+        }
+        runCatching { com.aiapp.data.ApkInstaller.install(context, f) }.onFailure { error = it.message }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val f = file
+        val p = progress
+        when {
+            f != null -> {
+                Text("✓ Downloaded ${f.name} — also saved to Downloads/AIApp", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                Button(onClick = { install(f) }, modifier = Modifier.fillMaxWidth()) { Text("Install app") }
+            }
+            p != null -> UploadBar("Downloading APK…", p)
+            else -> Button(
+                onClick = {
+                    error = null
+                    progress = 0f
+                    scope.launch {
+                        try {
+                            val downloaded = com.aiapp.data.ApkInstaller.download(context, url) { v ->
+                                scope.launch { progress = v }
+                            }
+                            file = downloaded
+                            install(downloaded)
+                        } catch (e: Exception) {
+                            error = e.message ?: "Download failed."
+                        } finally {
+                            progress = null
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                val s = size
+                Text("Download & install APK" + if (s != null) " (" + (if (s < 1048576) "${s / 1024} KB" else "%.1f MB".format(s / 1048576.0)) + ")" else "")
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
 }

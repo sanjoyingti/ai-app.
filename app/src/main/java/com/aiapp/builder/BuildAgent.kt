@@ -52,6 +52,8 @@ class BuildAgent(
     private val emit: (BuildEvent) -> Unit,
     /** Called whenever the project changes, so it can be saved. */
     private val onProject: (Project) -> Unit = {},
+    /** Live progress for long steps (null = done), with a short description. */
+    private val onProgress: (Float?, String) -> Unit = { _, _ -> },
 ) {
     private val gh = GitHubClient(req.githubToken)
     private val slug = (req.project?.appName ?: req.appName).lowercase().replace(Regex("[^a-z0-9]+"), "").ifEmpty { "app" }.take(30)
@@ -95,7 +97,9 @@ class BuildAgent(
             val zipLabel = req.zipName ?: existing?.zipName ?: "the project"
             if (resumeZip != null) step(BuildEvent.Kind.STEP, "The first upload didn't finish — uploading the whole project again")
             step(BuildEvent.Kind.STEP, "Unpacking $zipLabel")
-            val zip = withContext(Dispatchers.IO) { ZipImport.read(java.io.File(zipToRead!!), zipLabel) }
+            onProgress(-1f, "Reading ${mb(java.io.File(zipToRead!!).length())}…")
+            val zip = withContext(Dispatchers.IO) { ZipImport.read(java.io.File(zipToRead), zipLabel) }
+            onProgress(null, "")
             importedName = zip.name
             zip.files.forEach { (path, bytes) ->
                 pendingFiles[path] = bytes
@@ -165,9 +169,16 @@ class BuildAgent(
                 else -> "Initial app from AI App"
             }
             val total = pendingFiles.size + pendingDisk.size
-            val sha = gh.commit(repo, pendingFiles.toMap(), message, pendingDisk.toMap()) { n ->
-                step(BuildEvent.Kind.STEP, "Uploaded $n of $total files")
+            var lastPct = -1
+            val sha = gh.commit(repo, pendingFiles.toMap(), message, pendingDisk.toMap()) { n, of, sent, size ->
+                val pct = if (size > 0) (sent * 100 / size).toInt() else n * 100 / of.coerceAtLeast(1)
+                if (pct != lastPct) {
+                    lastPct = pct
+                    onProgress(pct / 100f, "$n of $of files · ${mb(sent)} of ${mb(size)}")
+                }
             }
+            onProgress(null, "")
+            step(BuildEvent.Kind.DONE, "Upload finished: $total file${if (total == 1) "" else "s"} (${mb(pendingFiles.values.sumOf { (it?.size ?: 0).toLong() } + pendingDisk.values.sumOf { it.length() })})")
             pendingFiles.clear()
             pendingDisk.values.forEach { it.delete() }
             pendingDisk.clear()
@@ -189,12 +200,19 @@ class BuildAgent(
 
             if (run.conclusion == "success") {
                 step(BuildEvent.Kind.STEP, "Build succeeded. Getting the download link")
+                // Only hand over a link once the APK file is really there.
                 var apk: String? = null
-                for (i in 0 until 10) {
+                var size: Long? = null
+                for (i in 0 until 20) {
                     apk = gh.latestApkUrl(repo)
-                    if (apk != null) break
+                    size = apk?.let { com.aiapp.data.ApkInstaller.check(it) }
+                    if (apk != null && size != null) break
                     delay(3000)
                 }
+                if (apk == null || size == null) {
+                    return BuildResult(false, "The build worked, but GitHub hasn't published the APK yet. Open the repo's Releases on GitHub in a minute.", repo.url)
+                }
+                step(BuildEvent.Kind.DONE, "APK ready: ${mb(size)}")
                 saveProject(repo, apk)
                 step(BuildEvent.Kind.DONE, "Done")
                 return BuildResult(
@@ -219,6 +237,8 @@ class BuildAgent(
             notes = apply(ask(fixPrompt(errors, notes)))
         }
     }
+
+    private fun mb(bytes: Long) = if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "%.1f MB".format(bytes / 1048576.0)
 
     private fun saveProject(repo: GitHubClient.Repo, apk: String?) {
         onProject(
