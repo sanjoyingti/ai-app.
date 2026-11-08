@@ -222,7 +222,22 @@ object MediaGen {
         return bytes(uri, headers)
     }
 
-    /** Saves to Pictures/AIApp or Movies/AIApp; returns a content Uri you can view or share. */
+    /**
+     * Keeps a created image/video inside the app's own storage, so Android deletes it when the
+     * app is uninstalled. Returns the file; use [shareUri] to open or share it.
+     */
+    suspend fun saveToApp(context: Context, data: ByteArray, video: Boolean): File = withContext(Dispatchers.IO) {
+        val isJpeg = data.size > 2 && data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte()
+        val ext = if (video) "mp4" else if (isJpeg) "jpg" else "png"
+        val dir = File(context.getExternalFilesDir(if (video) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES), "AIApp")
+            .apply { mkdirs() }
+        File(dir, "aiapp_${System.currentTimeMillis()}.$ext").apply { writeBytes(data) }
+    }
+
+    fun shareUri(context: Context, file: File): Uri =
+        androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", file)
+
+    /** Copies into the public Gallery (Pictures/AIApp or Movies/AIApp). Only when the user taps Save to Gallery. */
     suspend fun saveToGallery(context: Context, data: ByteArray, video: Boolean): Uri = withContext(Dispatchers.IO) {
         val isJpeg = data.size > 2 && data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte()
         val ext = if (video) "mp4" else if (isJpeg) "jpg" else "png"

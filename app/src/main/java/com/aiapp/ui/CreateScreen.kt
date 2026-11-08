@@ -195,9 +195,12 @@ fun CreateScreen(vm: CreateViewModel, onBack: () -> Unit, onOpenSettings: () -> 
                         runCatching { context.startActivity(Intent.createChooser(share, "Share")) }
                     }) { Text("Share") }
                 }
+                OutlinedButton(onClick = { vm.saveResultToGallery() }, enabled = !vm.inGallery) {
+                    Text(if (vm.inGallery) "In Gallery ✓" else "Save to Gallery")
+                }
             }
             Text(
-                "Free images by Pollinations.AI (open models, no key). Story videos are made on your phone, unlimited. AI clips use free Hugging Face servers with a daily limit.",
+                "Free images by Pollinations.AI (open models, no key). Story videos are made on your phone, unlimited. Results stay inside the app and are removed when you uninstall, unless you tap Save to Gallery. AI clips use free Hugging Face servers with a daily limit.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

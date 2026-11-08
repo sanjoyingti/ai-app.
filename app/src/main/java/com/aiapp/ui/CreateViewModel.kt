@@ -34,6 +34,20 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
         private set
     var resultBytes by mutableStateOf<ByteArray?>(null)
         private set
+    private var resultFile: java.io.File? = null
+    /** True once the user copied the current result into the public Gallery. */
+    var inGallery by mutableStateOf(false)
+        private set
+
+    fun saveResultToGallery() {
+        val f = resultFile ?: return
+        if (inGallery) return
+        viewModelScope.launch {
+            runCatching { MediaGen.saveToGallery(app, f.readBytes(), video = resultIsVideo) }
+                .onSuccess { inGallery = true; status = if (resultIsVideo) "✓ Saved to Movies/AIApp" else "✓ Saved to Pictures/AIApp" }
+                .onFailure { error = "Couldn't save to the gallery: ${it.message}" }
+        }
+    }
 
     /** Image or video. */
     var video by mutableStateOf(false)
@@ -71,10 +85,13 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
                     }
                     file.readBytes().also { file.delete() }
                 }
-                status = "Saving to your gallery…"
-                resultUri = MediaGen.saveToGallery(app, bytes, video = true)
+                status = "Saving…"
+                val f = MediaGen.saveToApp(app, bytes, video = true)
+                resultFile = f
+                inGallery = false
+                resultUri = MediaGen.shareUri(app, f)
                 resultIsVideo = true
-                status = "✓ Saved to Movies/AIApp"
+                status = "✓ Video ready"
             } catch (e: CancellationException) {
                 status = null
                 throw e
@@ -138,11 +155,14 @@ class CreateViewModel(private val app: Application) : AndroidViewModel(app) {
         job = viewModelScope.launch {
             try {
                 val bytes = FreeImages.image(prompt, model, w, h, reference) { status = it }
-                status = "Saving to your gallery…"
-                resultUri = MediaGen.saveToGallery(app, bytes, video = false)
+                status = "Saving…"
+                val f = MediaGen.saveToApp(app, bytes, video = false)
+                resultFile = f
+                inGallery = false
+                resultUri = MediaGen.shareUri(app, f)
                 resultBytes = bytes
                 resultIsVideo = false
-                status = "✓ Saved to Pictures/AIApp"
+                status = "✓ Image ready"
             } catch (e: CancellationException) {
                 status = null
                 throw e

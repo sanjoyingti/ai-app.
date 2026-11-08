@@ -687,7 +687,7 @@ private fun ApkDownload(url: String) {
         val p = progress
         when {
             f != null -> {
-                Text("✓ Downloaded ${f.name} — also saved to Downloads/AIApp", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                Text("✓ Downloaded ${f.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 Button(onClick = { install(f) }, modifier = Modifier.fillMaxWidth()) { Text("Install app") }
             }
             p != null -> UploadBar("Downloading APK…", p)

@@ -54,7 +54,6 @@ object ApkInstaller {
             out.delete()
             throw IllegalStateException("The downloaded file isn't a valid APK. Try again, or open the link in the browser.")
         }
-        saveCopy(context, out)
         out
     }
 
