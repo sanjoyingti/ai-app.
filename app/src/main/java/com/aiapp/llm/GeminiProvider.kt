@@ -50,7 +50,7 @@ class GeminiProvider : LlmProvider {
         effort: Effort,
         system: String,
     ): Flow<String> = fallbackOn400(
-        primary = { request(apiKey, model, messages, system, thinkingBudget(effort)) },
+        primary = { request(apiKey, model, messages, system, thinkingBudget(effort), thoughts = true) },
         fallback = { request(apiKey, model, messages, system, null) },
     )
 
@@ -60,6 +60,7 @@ class GeminiProvider : LlmProvider {
         messages: List<ChatMessage>,
         system: String,
         budget: Int?,
+        thoughts: Boolean = false,
     ): Flow<String> = flow {
         // Big files (over ~15 MB) go through Gemini's upload API first.
         val uploaded = AttachmentContent.geminiUploads(messages).associate { it.path to GeminiFiles.uri(apiKey, it) }
@@ -76,9 +77,13 @@ class GeminiProvider : LlmProvider {
                     }
                 }
             }
-            if (budget != null) {
+            if (budget != null || thoughts) {
                 putJsonObject("generationConfig") {
-                    putJsonObject("thinkingConfig") { put("thinkingBudget", budget) }
+                    putJsonObject("thinkingConfig") {
+                        if (budget != null) put("thinkingBudget", budget)
+                        // Stream summaries of the model's thinking so they can be shown live.
+                        if (thoughts) put("includeThoughts", true)
+                    }
                 }
             }
         }.toString()
@@ -91,11 +96,17 @@ class GeminiProvider : LlmProvider {
         val o = Http.json.parseToJsonElement(data).jsonObject
         val candidate = (o["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
         val parts = (candidate["content"] as? JsonObject)?.get("parts") as? JsonArray ?: return null
-        val text = parts.mapNotNull { p ->
-            val part = p as? JsonObject ?: return@mapNotNull null
-            if ((part["thought"] as? JsonPrimitive)?.booleanOrNull == true) return@mapNotNull null
-            (part["text"] as? JsonPrimitive)?.contentOrNull
-        }.joinToString("")
-        return text.ifEmpty { null }
+        var answer = ""
+        var thinking = ""
+        parts.forEach { p ->
+            val part = p as? JsonObject ?: return@forEach
+            val t = (part["text"] as? JsonPrimitive)?.contentOrNull ?: return@forEach
+            if ((part["thought"] as? JsonPrimitive)?.booleanOrNull == true) thinking += t else answer += t
+        }
+        return when {
+            answer.isNotEmpty() -> answer
+            thinking.isNotEmpty() -> thought(thinking)
+            else -> null
+        }
     }
 }

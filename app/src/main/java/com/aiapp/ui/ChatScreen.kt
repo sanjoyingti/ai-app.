@@ -1,5 +1,7 @@
 package com.aiapp.ui
 
+import androidx.compose.foundation.clickable
+
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
@@ -298,6 +300,9 @@ fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () ->
                                     color = MaterialTheme.colorScheme.primary,
                                 )
                             }
+                            if (vm.thinkingText.isNotBlank()) {
+                                ThinkingBox(vm.thinkingText, seconds = 0, live = vm.streamingText.isEmpty())
+                            }
                             if (vm.streamingText.isNotEmpty()) {
                                 MessageBubble(ChatMessage(Role.ASSISTANT, vm.streamingText))
                             }
@@ -429,6 +434,7 @@ private fun MessageBubble(message: ChatMessage, onBuildZip: (com.aiapp.llm.Attac
         }
     } else {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (message.thinking.isNotBlank()) ThinkingBox(message.thinking, message.thoughtSeconds, live = false)
             if (message.media.isNotEmpty()) MediaRow(message.media)
             if (message.text.isNotBlank()) {
                 SelectionContainer {
@@ -570,6 +576,44 @@ fun UploadBar(label: String, progress: Float, detail: String = "") {
         }
         if (detail.isNotBlank()) {
             Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+        }
+    }
+}
+
+/** The model's reasoning: streams live while it thinks, then folds into "Thought for N s" (tap to open). */
+@Composable
+fun ThinkingBox(text: String, seconds: Int, live: Boolean) {
+    var open by remember(live) { mutableStateOf(live) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().clickable(enabled = !live) { open = !open },
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (live) {
+                    androidx.compose.material3.CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    when {
+                        live -> "Thinking…"
+                        seconds > 0 -> "Thought for $seconds s  ${if (open) "▴" else "▾"}"
+                        else -> "Thinking  ${if (open) "▴" else "▾"}"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (open) {
+                Text(
+                    if (live) text.takeLast(1200) else text,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
         }
     }
 }

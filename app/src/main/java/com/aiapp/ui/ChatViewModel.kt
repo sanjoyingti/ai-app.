@@ -87,6 +87,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     var streamingText by mutableStateOf("")
+
+    /** The model's reasoning for the reply being written (live). */
+    var thinkingText by mutableStateOf("")
+        private set
+    private var thinkingStart = 0L
+    private var thoughtSeconds = 0
         private set
     var streaming by mutableStateOf(false)
         private set
@@ -523,6 +529,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val e = if (voice) Effort.LOW else effort
 
         streaming = true
+        thinkingText = ""
+        thinkingStart = 0L
+        thoughtSeconds = 0
         streamingText = ""
         status = if (p == ProviderId.OFFLINE) "Loading offline model…" else "Thinking…"
         val web = webEnabled
@@ -543,8 +552,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         fallback = { alternativeModel(p, k, m) },
                         onRetry = { status = it },
                     ).collect { delta ->
-                        if (status != "Writing…") status = "Writing…"
-                        streamingText += delta
+                        if (delta.startsWith(com.aiapp.llm.THOUGHT)) {
+                            // The model's reasoning, shown live in the Thinking box.
+                            if (thinkingStart == 0L) thinkingStart = System.currentTimeMillis()
+                            thinkingText += delta.substring(1)
+                            if (status != "Thinking…") status = "Thinking…"
+                        } else {
+                            if (thinkingStart > 0L && thoughtSeconds == 0) {
+                                thoughtSeconds = ((System.currentTimeMillis() - thinkingStart) / 1000).toInt().coerceAtLeast(1)
+                            }
+                            if (status != "Writing…") status = "Writing…"
+                            streamingText += delta
+                        }
                     }
                     if (!web || steps >= (if (voice) 1 else MAX_WEB_STEPS)) break
                     // (Offline models get the same number of lookups; they're cheap.)
@@ -623,10 +642,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val stripped = streamingText.replace(WebTools.searchTag, "").replace(WebTools.fetchTag, "")
             .replace(WebTools.downloadTag, "").replace(WebTools.imagesTag, "").replace(WebTools.videosTag, "").trim()
         if (stripped.isNotBlank() || foundMedia.isNotEmpty()) {
-            messages += ChatMessage(Role.ASSISTANT, stripped, media = foundMedia.toList())
+            val secs = if (thoughtSeconds > 0) thoughtSeconds
+                else if (thinkingStart > 0L) ((System.currentTimeMillis() - thinkingStart) / 1000).toInt().coerceAtLeast(1) else 0
+            messages += ChatMessage(Role.ASSISTANT, stripped, media = foundMedia.toList(), thinking = thinkingText.trim(), thoughtSeconds = secs)
         }
         foundMedia.clear()
         persist()
+        thinkingText = ""
+        thinkingStart = 0L
+        thoughtSeconds = 0
         streamingText = ""
         status = null
         streaming = false

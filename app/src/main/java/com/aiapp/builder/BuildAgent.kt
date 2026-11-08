@@ -306,13 +306,26 @@ class BuildAgent(
         var steps = 0
         while (true) {
             val sb = StringBuilder()
+            val thinking = StringBuilder()
             var scanned = 0
             com.aiapp.llm.resilient(
                 attempt = { model -> Providers.get(req.provider).stream(req.apiKey, model, working.toList(), effort, system) },
                 model = req.model,
                 fallback = { com.aiapp.llm.alternativeModel(req.provider, req.apiKey, req.model) },
                 onRetry = { step(BuildEvent.Kind.STEP, it) },
-            ).collect { chunk ->
+            ).collect { raw ->
+                if (raw.startsWith(com.aiapp.llm.THOUGHT)) {
+                    // Show what the model is thinking, live, under the current step.
+                    thinking.append(raw.substring(1))
+                    onProgress(-1f, "Thinking: " + thinking.toString().replace('\n', ' ').takeLast(160))
+                    return@collect
+                }
+                if (thinking.isNotEmpty()) {
+                    step(BuildEvent.Kind.THINKING, "Thought it through: " + thinking.toString().replace('\n', ' ').trim().take(140) + "…")
+                    thinking.clear()
+                    onProgress(null, "")
+                }
+                val chunk = raw
                 sb.append(chunk)
                 // Announce files as their headers arrive, like an IDE agent.
                 val nl = sb.lastIndexOf("\n")

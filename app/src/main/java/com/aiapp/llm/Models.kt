@@ -56,7 +56,15 @@ data class ChatMessage(
     val text: String,
     val attachments: List<Attachment> = emptyList(),
     val media: List<MediaItem> = emptyList(),
+    /** The model's visible reasoning for this reply, if it shared any. */
+    val thinking: String = "",
+    val thoughtSeconds: Int = 0,
 )
+
+/** Stream chunks starting with this character are the model's thinking, not its answer. */
+const val THOUGHT = "\u0001"
+
+fun thought(text: String) = THOUGHT + text
 
 data class ModelInfo(val id: String, val name: String)
 

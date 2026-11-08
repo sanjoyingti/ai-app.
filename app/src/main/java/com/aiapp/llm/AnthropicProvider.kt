@@ -65,7 +65,8 @@ class AnthropicProvider : LlmProvider {
         val attempts = mutableListOf<() -> Flow<String>>()
         val level = effortValue(effort)
         if (level != null) {
-            // Newest format: adaptive thinking steered by output_config.effort.
+            // Newest format: adaptive thinking steered by output_config.effort, with visible thinking.
+            attempts += { request(apiKey, model, messages, system, maxTokens(effort), level, null, showThinking = true) }
             attempts += { request(apiKey, model, messages, system, maxTokens(effort), level, null) }
             // Some models cap below "max".
             if (level == "max") attempts += { request(apiKey, model, messages, system, maxTokens(effort), "high", null) }
@@ -87,6 +88,7 @@ class AnthropicProvider : LlmProvider {
         maxTokens: Int,
         effort: String?,
         budget: Int?,
+        showThinking: Boolean = false,
     ): Flow<String> {
         val body = buildJsonObject {
             put("model", model)
@@ -103,7 +105,11 @@ class AnthropicProvider : LlmProvider {
                 }
             }
             if (effort != null) {
-                putJsonObject("thinking") { put("type", "adaptive") }
+                putJsonObject("thinking") {
+                    put("type", "adaptive")
+                    // Ask for a readable summary of the reasoning, to show live.
+                    if (showThinking) put("display", "summarized")
+                }
                 putJsonObject("output_config") { put("effort", effort) }
             } else if (budget != null) {
                 putJsonObject("thinking") {
@@ -121,9 +127,11 @@ class AnthropicProvider : LlmProvider {
         return when ((o["type"] as? JsonPrimitive)?.contentOrNull) {
             "content_block_delta" -> {
                 val delta = o["delta"] as? JsonObject ?: return null
-                if ((delta["type"] as? JsonPrimitive)?.contentOrNull == "text_delta") {
-                    (delta["text"] as? JsonPrimitive)?.contentOrNull
-                } else null
+                when ((delta["type"] as? JsonPrimitive)?.contentOrNull) {
+                    "text_delta" -> (delta["text"] as? JsonPrimitive)?.contentOrNull
+                    "thinking_delta" -> (delta["thinking"] as? JsonPrimitive)?.contentOrNull?.let { thought(it) }
+                    else -> null
+                }
             }
             "error" -> {
                 val err = o["error"] as? JsonObject

@@ -96,6 +96,7 @@ class OpenModelsProvider : LlmProvider {
                 }
             }
             if (effort != null) put("reasoning_effort", effort)
+            put("include_reasoning", true)
         }.toString()
 
         return Http.sse("$base/chat/completions", headers(apiKey), body).mapNotNull { data -> parse(data) }
@@ -108,6 +109,12 @@ class OpenModelsProvider : LlmProvider {
         }
         val choice = (o["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return null
         val delta = choice["delta"] as? JsonObject ?: return null
-        return (delta["content"] as? JsonPrimitive)?.contentOrNull?.ifEmpty { null }
+        val content = (delta["content"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val reasoning = (delta["reasoning"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        return when {
+            content.isNotEmpty() -> content
+            reasoning.isNotEmpty() -> thought(reasoning)
+            else -> null
+        }
     }
 }
