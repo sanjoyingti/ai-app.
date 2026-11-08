@@ -138,11 +138,11 @@ object ProjectTemplate {
                   - name: Build debug APK
                     run: |
                       set -o pipefail
-                      gradle assembleDebug --stacktrace 2>&1 | tee build.log
+                      gradle assembleDebug --continue --stacktrace 2>&1 | tee build.log
                   - name: Report errors
                     if: failure()
                     run: |
-                      grep -E "^e: |error:|What went wrong|Could not resolve|FAILURE" -A2 build.log | head -60 | while IFS= read -r l; do
+                      grep -E "^e: |error:|What went wrong|Could not resolve|FAILURE" -A2 build.log | head -200 | while IFS= read -r l; do
                         echo "::error::${'$'}{l//%/%25}"
                       done
                   - name: Rename APK
@@ -204,14 +204,14 @@ object ProjectTemplate {
                   set -o pipefail
                   if [ -f gradlew ]; then
                     chmod +x gradlew
-                    ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
+                    ./gradlew assembleDebug --continue --stacktrace 2>&1 | tee build.log
                   else
-                    gradle assembleDebug --stacktrace 2>&1 | tee build.log
+                    gradle assembleDebug --continue --stacktrace 2>&1 | tee build.log
                   fi
               - name: Report errors
                 if: failure()
                 run: |
-                  grep -E "^e: |error:|What went wrong|Could not resolve|FAILURE" -A2 build.log | head -60 | while IFS= read -r l; do
+                  grep -E "^e: |error:|What went wrong|Could not resolve|FAILURE" -A2 build.log | head -200 | while IFS= read -r l; do
                     echo "::error::${'$'}{l//%/%25}"
                   done
               - name: Collect APK

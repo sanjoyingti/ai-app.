@@ -266,7 +266,7 @@ class GitHubClient(private val token: String) {
                 ann.orEmpty().mapNotNull { ((it as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull }
             }.filter { !it.contains("Node.js") && !it.contains("deprecated") && !it.contains("ubuntu-latest") }
         }.getOrNull().orEmpty()
-        return notes.joinToString("\n").ifBlank { "The build failed, but its error details couldn't be read." }.take(6000)
+        return notes.joinToString("\n").ifBlank { "The build failed, but its error details couldn't be read." }.take(14000)
     }
 
     suspend fun latestApkUrl(repo: Repo): String? {
@@ -287,14 +287,15 @@ class GitHubClient(private val token: String) {
                 val t = l.trim()
                 if (t.startsWith("e: ") || t.contains("error:", ignoreCase = true) ||
                     t.startsWith("ERROR:") || t.contains("Unresolved reference") ||
-                    t.contains("AAPT: error")
+                    t.contains("AAPT: error") || t.startsWith("Execution failed for task") ||
+                    t.startsWith("Could not ") || t.startsWith("Cannot ") || t.contains("Manifest merger failed")
                 ) picked += t
                 if (t.startsWith("* What went wrong")) {
-                    lines.drop(i + 1).take(8).forEach { picked += it.trim() }
+                    lines.drop(i + 1).take(15).forEach { picked += it.trim() }
                 }
             }
             val text = picked.filter { it.isNotBlank() }.joinToString("\n")
-            return text.ifBlank { lines.takeLast(40).joinToString("\n") }.take(6000)
+            return text.ifBlank { lines.takeLast(60).joinToString("\n") }.take(14000)
         }
     }
 }

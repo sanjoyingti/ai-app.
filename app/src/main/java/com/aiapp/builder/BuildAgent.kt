@@ -186,6 +186,7 @@ class BuildAgent(
                     ProjectTemplate.files(appName, packageName, deps.toList()).getValue("app/build.gradle.kts").toByteArray()
                 depsChanged = false
             }
+            preflight()
             // Make sure GitHub always has the build instructions (harmless if unchanged).
             if (imported) {
                 pendingFiles[".github/workflows/${ProjectTemplate.IMPORT_WORKFLOW_FILE}"] = ProjectTemplate.importWorkflow.toByteArray()
@@ -275,6 +276,26 @@ class BuildAgent(
             notes = apply(ask(fixPrompt(errors, notes)))
             saveProject(repo, null)
         }
+    }
+
+    /** Fixes common setup mistakes before building, so they never cost a fix round. */
+    private fun preflight() {
+        if (!imported) return // new apps come from the template, which is already set up
+        // Only when we can see the project's text files (very large projects aren't loaded as text).
+        if (files.keys.none { it.startsWith("settings.gradle") }) return
+        val buildFiles = files.filterKeys { it.endsWith(".gradle") || it.endsWith(".gradle.kts") || it.endsWith(".toml") }
+        val usesAndroidX = buildFiles.values.any { it.contains("androidx") }
+        if (!usesAndroidX) return
+        val props = files["gradle.properties"].orEmpty()
+        val add = buildList {
+            if (!props.contains("android.useAndroidX")) add("android.useAndroidX=true")
+            if (!props.contains("org.gradle.jvmargs")) add("org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8")
+        }
+        if (add.isEmpty()) return
+        val updated = (props.trimEnd() + "\n" + add.joinToString("\n") + "\n").trimStart()
+        files["gradle.properties"] = updated
+        pendingFiles["gradle.properties"] = updated.toByteArray()
+        step(BuildEvent.Kind.FILE, "Auto-fixed gradle.properties (${add.joinToString { it.substringBefore('=') }})")
     }
 
     private fun mb(bytes: Long) = if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "%.1f MB".format(bytes / 1048576.0)
@@ -447,7 +468,12 @@ class BuildAgent(
     }
 
     private fun fixPrompt(errors: String, notes: List<String>) = buildString {
-        appendLine("The app below failed to build. Fix it.")
+        appendLine("The app below failed to build. Fix EVERY error in ONE reply, not one at a time:")
+        appendLine("1. Fix all the errors listed below together.")
+        appendLine("2. Then check every file yourself for problems that would fail the NEXT build: missing imports, wrong package names, " +
+            "missing resources/strings/drawables, Manifest entries, Gradle plugin/SDK/namespace settings, android.useAndroidX in gradle.properties, " +
+            "dependency versions, Kotlin/Compose version mismatches. Fix those too now.")
+        appendLine("3. Send every changed file complete. The goal is that the next build succeeds.")
         appendLine("App request: ${req.project?.description ?: req.description}")
         if (req.project != null) appendLine("Latest change requested: ${req.description}")
         appendLine()
