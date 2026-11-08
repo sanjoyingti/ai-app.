@@ -285,6 +285,11 @@ private fun ResultCard(r: TimelineItem.Result, onRetry: (() -> Unit)? = null) {
                 }
                 r.repoUrl?.let { url -> TextButton(onClick = { uri.openUri(url) }) { Text("GitHub") } }
             }
+            r.repoUrl?.let { url ->
+                OutlinedButton(onClick = { runCatching { uri.openUri(codespaceUrl(url)) } }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open in Codespace (edit the code in VS Code)")
+                }
+            }
             if (r.success) {
                 Text(
                     "Ask for changes below — the new version installs over this one.",
@@ -641,6 +646,10 @@ private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    p.project?.repoUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                        val u = LocalUriHandler.current
+                        TextButton(onClick = { runCatching { u.openUri(codespaceUrl(url)) } }) { Text("Codespace") }
+                    }
                     if (!(current && vm.running)) {
                         TextButton(onClick = {
                             vm.deleteProject(p.id)
@@ -652,6 +661,15 @@ private fun ProjectList(vm: BuildViewModel, onBack: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * GitHub Codespaces link for a repo: opens VS Code in the browser with the project. quickstart=1
+ * reopens your existing codespace for this repo instead of making a new one each time.
+ */
+private fun codespaceUrl(repoUrl: String): String {
+    val path = repoUrl.removePrefix("https://github.com/").trimEnd('/')
+    return "https://codespaces.new/$path?quickstart=1"
 }
 
 /** Downloads the APK in the app with a progress bar, checks it, then opens Android's installer. */
