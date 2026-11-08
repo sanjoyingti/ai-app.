@@ -68,7 +68,9 @@ object CodespaceState {
         if (path != repo || web == null) {
             close()
             repo = path
-            web = create(context, prefs(context).getString(path, null) ?: chooserUrl(path))
+            val saved = prefs(context).getString(path, null)
+            codespaceName = saved?.let { android.net.Uri.parse(it).host }?.takeIf { it.endsWith(".github.dev") }?.removeSuffix(".github.dev")
+            web = create(context, saved ?: chooserUrl(path))
             alive = true
         }
         visible = true
@@ -102,6 +104,23 @@ object CodespaceState {
         web?.loadUrl(chooserUrl(r))
     }
 
+    /** e.g. "fluffy-space-abc123", from the VS Code address <name>.github.dev. */
+    private var codespaceName: String? = null
+
+    /**
+     * Tools in the codespace terminal (Codex, Claude Code, gh, Firebase…) sign in by sending the
+     * browser back to http://localhost:PORT. That port lives in the codespace, not on the phone, so
+     * send it through the codespace's forwarded address instead: https://<name>-PORT.app.github.dev.
+     */
+    internal fun forwardedUrl(u: android.net.Uri): String? {
+        val host = u.host ?: return null
+        if (host != "localhost" && host != "127.0.0.1" && host != "0.0.0.0") return null
+        val port = u.port.takeIf { it > 0 } ?: return null
+        val name = codespaceName ?: return null
+        val rest = (u.encodedPath ?: "/") + (u.encodedQuery?.let { "?$it" } ?: "")
+        return "https://$name-$port.app.github.dev$rest"
+    }
+
     private fun rememberUrl(context: Context, u: String) {
         val r = repo ?: return
         prefs(context).edit().putString(r, u).apply()
@@ -126,12 +145,25 @@ object CodespaceState {
             // Once VS Code opens (https://<name>.github.dev), remember it: next time it opens directly.
             override fun doUpdateVisitedHistory(view: WebView, u: String?, isReload: Boolean) {
                 val host = u?.let { android.net.Uri.parse(it).host }.orEmpty()
-                if (host.endsWith(".github.dev") && host != "github.dev") rememberUrl(appContext, u!!)
+                if (host.endsWith(".github.dev") && host != "github.dev" && !host.endsWith(".app.github.dev")) {
+                    codespaceName = host.removeSuffix(".github.dev")
+                    rememberUrl(appContext, u!!)
+                }
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                forwardedUrl(request.url)?.let {
+                    view.loadUrl(it)
+                    return true
+                }
                 val scheme = request.url.scheme.orEmpty()
                 return scheme != "http" && scheme != "https"
+            }
+
+            // A localhost page that slipped through (e.g. typed or redirected): retry via the codespace.
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+                if (!request.isForMainFrame) return
+                forwardedUrl(request.url)?.let { view.loadUrl(it) }
             }
         }
         webChromeClient = object : WebChromeClient() {
