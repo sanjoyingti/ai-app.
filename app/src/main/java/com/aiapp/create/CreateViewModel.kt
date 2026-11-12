@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.create
 import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.getValue

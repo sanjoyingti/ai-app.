@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.voice
 import android.annotation.SuppressLint
 import android.media.AudioAttributes
 import android.media.AudioFormat

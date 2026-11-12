@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.design
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap

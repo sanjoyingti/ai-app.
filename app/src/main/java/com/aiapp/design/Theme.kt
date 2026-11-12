@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.design
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme

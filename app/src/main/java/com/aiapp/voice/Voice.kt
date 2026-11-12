@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.voice
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle

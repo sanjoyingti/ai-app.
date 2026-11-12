@@ -1,5 +1,6 @@
-package com.aiapp.ui
-
+package com.aiapp.builder.ui
+import com.aiapp.chat.ChatViewModel
+import com.aiapp.design.UploadBar
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts

@@ -1,5 +1,5 @@
-package com.aiapp.ui
-
+package com.aiapp.chatlist
+import com.aiapp.chat.ChatViewModel
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row

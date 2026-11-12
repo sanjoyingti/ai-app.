@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.builder.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.aiapp.builder.BuildRequest

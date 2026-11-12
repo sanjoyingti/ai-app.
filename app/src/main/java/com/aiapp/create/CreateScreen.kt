@@ -1,5 +1,5 @@
-package com.aiapp.ui
-
+package com.aiapp.create
+import com.aiapp.design.UploadBar
 import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image

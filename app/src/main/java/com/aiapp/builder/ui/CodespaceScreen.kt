@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.builder.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Message

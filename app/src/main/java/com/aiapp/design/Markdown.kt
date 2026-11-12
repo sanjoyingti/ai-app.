@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.design
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

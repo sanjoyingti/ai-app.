@@ -15,3 +15,7 @@ Settings → paste your API keys (stored encrypted on the phone, never in this r
 
 v0.1: streaming chat, 3 providers, model picker, effort levels.
 Next: conversation history, file upload, voice with interruptions, image/video generation, app-building agent.
+
+## Code layout
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the packages are organised.

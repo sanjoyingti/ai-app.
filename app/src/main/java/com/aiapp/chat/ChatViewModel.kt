@@ -1,5 +1,4 @@
-package com.aiapp.ui
-
+package com.aiapp.chat
 import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.getValue
