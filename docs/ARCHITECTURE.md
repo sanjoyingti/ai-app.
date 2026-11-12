@@ -33,7 +33,7 @@ feature, or anything about server APIs.
 ```
 com.aiapp
 ├── MainActivity.kt      Thin: theme + AppShell, memory trimming
-├── app/                 App shell: Screen (destinations) and AppShell (navigation)
+├── app/                 App shell: Screen (destinations), AppShell (navigation), IncomingShare
 ├── chat/                Chat screen and its view model
 ├── chatlist/            Saved chats (History)
 ├── voice/               Voice mode: phone voice, Gemini Live, voice screen
@@ -66,6 +66,14 @@ moved out of `MainActivity` into `app/AppShell.kt`. Screens are now a typed
 5. **Work that must survive leaving the screen goes in a service**, as
    `builder/BuildService` already does.
 
+## Entry points
+
+- **Launcher:** `MainActivity` shows `AppShell`.
+- **Share from other apps:** `MainActivity` also accepts shared text, photos and
+  files. `app/IncomingShare` passes files to Chat as attachments and puts text in
+  the message box, then the shell switches to Chat. The activity is `singleTask`,
+  so a share lands in the chat that is already open.
+
 ## Not done yet
 
 These follow the same pattern but were left out because each changes behaviour
@@ -80,7 +88,5 @@ and needs testing on a phone:
 - **Streaming in a service.** Chat replies stream inside the view model, so a
   long reply can stop if Android kills the hidden app. Build Mode already avoids
   this with a foreground service.
-- **Share-to-app entry point.** A small activity that receives shared text or
-  images from other apps and opens them in Chat.
 - **Database for chats.** Chats are one JSON file each, read in full to list
   them. Fine for now; Room becomes worth it when lists get slow.

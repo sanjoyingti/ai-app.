@@ -78,6 +78,12 @@ import com.aiapp.llm.Role
 @Composable
 fun ChatScreen(vm: ChatViewModel, onOpenSettings: () -> Unit, onOpenBuild: () -> Unit, onOpenHistory: () -> Unit, onOpenCreate: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
+    // Text shared from another app goes into the message box, after anything already typed.
+    androidx.compose.runtime.LaunchedEffect(vm.sharedText) {
+        val shared = vm.sharedText ?: return@LaunchedEffect
+        input = if (input.isBlank()) shared else input + "\n" + shared
+        vm.sharedText = null
+    }
     val listState = rememberLazyListState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val voice = remember { VoiceController(context) }

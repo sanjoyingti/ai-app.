@@ -61,6 +61,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Files being attached right now: name → progress 0..1 (-1 = size unknown). */
     val attachProgress = mutableStateMapOf<String, Float>()
 
+    /** Text shared into the app from another app, waiting to be placed in the message box. */
+    var sharedText by mutableStateOf<String?>(null)
+
     fun attach(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
         attaching = true

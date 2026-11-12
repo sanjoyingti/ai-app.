@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -39,6 +40,8 @@ fun AppShell() {
     val home = { screen = Screen.Chat }
     val settings = { screen = Screen.Settings }
     BackHandler(enabled = screen != Screen.Chat, onBack = home)
+    // Something was shared into the app: show Chat, where it lands.
+    LaunchedEffect(IncomingShare.count) { if (IncomingShare.count > 0) screen = Screen.Chat }
 
     // VS Code (Codespace) on top when open; it keeps running while you use the app.
     if (CodespaceState.visible) {
